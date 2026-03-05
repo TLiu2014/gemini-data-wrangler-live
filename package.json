@@ -1,0 +1,18 @@
+{
+  "name": "gemini-data-wrangler-live",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:frontend": "npm -w apps/frontend run dev",
+    "dev:backend": "npm -w apps/backend run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "npm -w apps/backend run build && npm -w apps/frontend run build",
+    "start": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  }
+}
