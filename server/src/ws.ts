@@ -9,7 +9,8 @@ export interface WsMessage {
     | "action"
     | "sql"
     | "status"
-    | "text";
+    | "text"
+    | "user_text";
   payload: unknown;
 }
 
@@ -47,6 +48,14 @@ export function registerWebSocketRoutes(app: FastifyInstance) {
             case "screenshot": {
               const payload = msg.payload as { data: string };
               gemini?.sendScreenshot(payload.data);
+              break;
+            }
+
+            case "status": {
+              const payload = msg.payload as { uiContext?: unknown };
+              if (payload?.uiContext) {
+                gemini?.sendUiContext(payload.uiContext);
+              }
               break;
             }
 

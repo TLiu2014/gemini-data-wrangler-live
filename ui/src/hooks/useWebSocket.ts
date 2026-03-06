@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from "react";
 
 export interface WsMessage {
-  type: "audio" | "screenshot" | "action" | "sql" | "status" | "text";
+  type: "audio" | "screenshot" | "action" | "sql" | "status" | "text" | "user_text";
   payload: unknown;
 }
 
@@ -17,6 +17,7 @@ interface UseWebSocketOptions {
   onAction?: (payload: ActionPayload) => void;
   onSql?: (payload: { sql: string; description: string }) => void;
   onText?: (payload: { text: string }) => void;
+  onUserText?: (payload: { text: string }) => void;
 }
 
 export function useWebSocket(opts: UseWebSocketOptions = {}) {
@@ -51,6 +52,9 @@ export function useWebSocket(opts: UseWebSocketOptions = {}) {
             break;
           case "text":
             optsRef.current.onText?.(msg.payload as { text: string });
+            break;
+          case "user_text":
+            optsRef.current.onUserText?.(msg.payload as { text: string });
             break;
           case "status":
             console.log("Status:", msg.payload);

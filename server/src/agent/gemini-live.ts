@@ -7,6 +7,7 @@ const GEMINI_MODEL = "gemini-2.0-flash-live-001";
 
 const SYSTEM_INSTRUCTION = `You are a data wrangling assistant inside a visual pipeline editor.
 The user talks to you via voice. You can see their screen.
+You may receive structured UI navigator context as text updates describing node/edge edits.
 You have tools to:
 - Add nodes to the pipeline graph (CSV import, filter, transform, output)
 - Execute SQL queries against the user's data via DuckDB
@@ -33,7 +34,9 @@ export class GeminiLiveSession {
         responseModalities: [Modality.AUDIO],
         systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
         tools: [{ functionDeclarations: getToolDeclarations() }],
-      },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+      } as any,
       callbacks: {
         onopen: () => {
           console.log("Gemini Live session opened");
@@ -81,6 +84,20 @@ export class GeminiLiveSession {
       }
     }
 
+    // Input transcription (user's speech → text)
+    const inputTranscript = msg.serverContent?.inputTranscription?.text
+      ?? (msg as any).inputTranscription?.text;
+    if (inputTranscript) {
+      this.sendToClient({ type: "user_text", payload: { text: inputTranscript } });
+    }
+
+    // Output transcription (model's speech → text)
+    const outputTranscript = msg.serverContent?.outputTranscription?.text
+      ?? (msg as any).outputTranscription?.text;
+    if (outputTranscript) {
+      this.sendToClient({ type: "text", payload: { text: outputTranscript } });
+    }
+
     // Tool calls from the model
     const toolCalls = msg.toolCall?.functionCalls;
     if (toolCalls?.length) {
@@ -102,6 +119,18 @@ export class GeminiLiveSession {
     this.session?.sendRealtimeInput({
       media: { mimeType: "image/jpeg", data: base64Image },
     });
+  }
+
+  sendUiContext(uiContext: unknown): void {
+    const text = `UI Navigator update: ${JSON.stringify(uiContext).slice(0, 8000)}`;
+    try {
+      (this.session as any)?.sendClientContent?.({
+        turns: [{ role: "user", parts: [{ text }] }],
+        turnComplete: false,
+      });
+    } catch (err) {
+      console.warn("Failed to send UI context to Gemini:", err);
+    }
   }
 
   disconnect(): void {

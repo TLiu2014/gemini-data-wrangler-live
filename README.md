@@ -45,22 +45,21 @@ Open http://localhost:5173 in your browser, click **Connect**, and start talking
 ## Project Structure
 
 ```
-apps/
-  backend/          Node.js + Fastify WebSocket server
-    src/
-      index.ts      Server entry point
-      ws.ts         WebSocket message routing
-      agent/
-        tools.ts    Gemini ADK tool definitions
-  frontend/         React + Vite SPA
-    src/
-      App.tsx       Main 3-pane layout
-      hooks/
-        useWebSocket.ts   WebSocket client hook
-      components/
-        Sidebar.tsx       Voice controls + audio visualizer
-        FlowPane.tsx      React Flow data pipeline canvas
-        DataTable.tsx     DuckDB query results table
+server/            Node.js + Fastify WebSocket server
+  src/
+    index.ts        Server entry point
+    ws.ts           WebSocket message routing
+    agent/
+      tools.ts      Gemini ADK tool definitions
+ui/                React + Vite SPA
+  src/
+    App.tsx         Main 3-pane layout
+    hooks/
+      useWebSocket.ts   WebSocket client hook
+    components/
+      Sidebar.tsx       Voice controls + audio visualizer
+      FlowPane.tsx      React Flow data pipeline canvas
+      DataTable.tsx     DuckDB query results table
 ```
 
 ## License

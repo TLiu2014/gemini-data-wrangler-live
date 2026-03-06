@@ -2,13 +2,14 @@
   "name": "gemini-data-wrangler-live",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "ui",
+    "server"
   ],
   "scripts": {
-    "dev:frontend": "npm -w apps/frontend run dev",
-    "dev:backend": "npm -w apps/backend run dev",
+    "dev:frontend": "npm -w ui run dev",
+    "dev:backend": "npm -w server run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "build": "npm -w apps/backend run build && npm -w apps/frontend run build",
+    "build": "npm -w server run build && npm -w ui run build",
     "start": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
   },
   "devDependencies": {

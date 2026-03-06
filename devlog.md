@@ -1,7 +1,7 @@
 # Dev Log
 
 ## Phase 1: Scaffolding & Plumbing
-- Monorepo setup with npm workspaces (`apps/frontend`, `apps/backend`)
+- Monorepo setup with npm workspaces (`ui`, `server`)
 - Backend: Fastify + `@fastify/websocket` server on port 3001
 - Frontend: React + Vite + TypeScript with Vite proxy for `/ws`
 - WebSocket message protocol (`WsMessage` type) shared between FE/BE
@@ -37,3 +37,20 @@
   - Driven by `RENDER_CHART` agent actions
 - Sidebar: file upload section, shows loaded table name badge
 - `App.tsx`: full wiring — `onSql` → `executeQuery`, `RENDER_CHART` → chart state, CSV upload auto-adds flow node
+
+## Phase 4: UI Polish & Theme Alignment
+- **Light theme** by default (Google colors: #4285f4 primary, #ffffff bg, #f8f9fa surface)
+- **Top bar** with Gemini gradient, title "Gemini Data Wrangler Live", settings gear with API key input
+- **Auto-connect** — WS connects on page load, no "Connect" button needed
+- **Auto-unmute** — mic starts automatically once permission granted + WS connected
+- **Mic permission** prompted on page load via `useMicPermission` hook; denied state shows banner
+- **Two voice visualizers** — "You" (mic analyser, blue→purple gradient) and "Gemini" (output analyser, purple→blue)
+- **Transcript** — Gemini text responses shown below voice waves
+- **CSV upload moved** to top of sidebar
+- **Resizable sidebar** — drag handle between sidebar and main content (240–500px range)
+- **Resizable flow/data split** — horizontal drag handle between React Flow and data pane (15–85%)
+- **Table tabs** — scrollable tab bar for multiple DuckDB tables (like `TableTabs` in reference project)
+- **Multi-table support** in `useDuckDB` — each CSV load or query result becomes a tab
+- **React Flow theme** — light background, Google-themed stage colors (LOAD=#10b981, JOIN=#3b82f6, FILTER=#f59e0b, etc.)
+- **Gradient edges** — SVG linearGradient from source node color to target node color on connecting edges
+- Mic button below voice waves, not above

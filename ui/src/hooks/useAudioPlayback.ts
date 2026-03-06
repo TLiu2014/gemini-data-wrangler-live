@@ -5,11 +5,19 @@ const OUTPUT_SAMPLE_RATE = 24000; // Gemini Live outputs 24kHz PCM
 export function useAudioPlayback() {
   const ctxRef = useRef<AudioContext | null>(null);
   const nextStartRef = useRef(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
   const getContext = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
       ctxRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
       nextStartRef.current = 0;
+      // Create a persistent analyser for the output visualizer
+      analyserRef.current = ctxRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
+      analyserRef.current.smoothingTimeConstant = 0.9;
+      analyserRef.current.minDecibels = -85;
+      analyserRef.current.maxDecibels = -20;
+      analyserRef.current.connect(ctxRef.current.destination);
     }
     return ctxRef.current;
   }, []);
@@ -35,9 +43,13 @@ export function useAudioPlayback() {
 
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      // Route through analyser so visualizer can pick it up
+      if (analyserRef.current) {
+        source.connect(analyserRef.current);
+      } else {
+        source.connect(ctx.destination);
+      }
 
-      // Schedule seamlessly after previous chunk
       const now = ctx.currentTime;
       const startAt = Math.max(now, nextStartRef.current);
       source.start(startAt);
@@ -49,8 +61,9 @@ export function useAudioPlayback() {
   const stop = useCallback(() => {
     ctxRef.current?.close();
     ctxRef.current = null;
+    analyserRef.current = null;
     nextStartRef.current = 0;
   }, []);
 
-  return { playChunk, stop, audioContext: ctxRef };
+  return { playChunk, stop, analyser: analyserRef };
 }
