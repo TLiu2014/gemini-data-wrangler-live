@@ -6,13 +6,20 @@ import { getToolDeclarations, handleToolCall } from "./tools.js";
 const GEMINI_MODEL = "gemini-2.0-flash-live-001";
 
 const SYSTEM_INSTRUCTION = `You are a data wrangling assistant inside a visual pipeline editor.
-The user talks to you via voice. You can see their screen.
-You may receive structured UI navigator context as text updates describing node/edge edits.
+The user talks to you via voice.
+You do NOT have vision — you rely on table schemas and text context the user provides.
+You may receive:
+- Table schemas describing loaded CSV data (table names, column names, and types)
+- Structured UI context as text updates describing node/edge edits
+
 You have tools to:
-- Add nodes to the pipeline graph (CSV import, filter, transform, output)
-- Execute SQL queries against the user's data via DuckDB
+- Add nodes to the pipeline graph (CSV import, filter, transform, output, join, union)
+- Execute SQL queries against the user's data via DuckDB (running locally in the browser)
 - Render charts from the data
+
 When the user asks you to manipulate data or the pipeline, use your tools.
+When you use executeDataTransform, the SQL runs in the user's browser via DuckDB-WASM. You will receive the query results (row count, sample rows, or errors) as a tool response so you can summarize them for the user.
+For JOIN queries, use standard SQL: CREATE TABLE result AS SELECT ... FROM t1 JOIN t2 ON t1.key = t2.key.
 Be concise in your spoken responses — the user is watching the UI update in real time.`;
 
 export class GeminiLiveSession {
@@ -101,11 +108,19 @@ export class GeminiLiveSession {
     // Tool calls from the model
     const toolCalls = msg.toolCall?.functionCalls;
     if (toolCalls?.length) {
-      const responses = toolCalls.map((call: any) => {
-        const result = handleToolCall(this.clientSocket, call.name, call.args);
-        return { id: call.id, name: call.name, response: result };
-      });
-      this.session?.sendToolResponse({ functionResponses: responses });
+      const immediateResponses: any[] = [];
+      for (const call of toolCalls) {
+        if (call.name === "executeDataTransform") {
+          // Defer: send SQL to frontend for execution; frontend will return results via tool_result
+          handleToolCall(this.clientSocket, call.name, call.args, call.id);
+        } else {
+          const result = handleToolCall(this.clientSocket, call.name, call.args);
+          immediateResponses.push({ id: call.id, name: call.name, response: result });
+        }
+      }
+      if (immediateResponses.length > 0) {
+        this.session?.sendToolResponse({ functionResponses: immediateResponses });
+      }
     }
   }
 
@@ -119,6 +134,32 @@ export class GeminiLiveSession {
     this.session?.sendRealtimeInput({
       media: { mimeType: "image/jpeg", data: base64Image },
     });
+  }
+
+  sendSchemaContext(schemas: Record<string, string[]>): void {
+    const lines = Object.entries(schemas).map(
+      ([table, cols]) => `Table "${table}": ${cols.join(", ")}`,
+    );
+    const text = `[DATA CONTEXT] The user has loaded the following tables:\n${lines.join("\n")}`;
+    console.log("Sending schema context to Gemini:", text);
+    try {
+      (this.session as any)?.sendClientContent?.({
+        turns: [{ role: "user", parts: [{ text }] }],
+        turnComplete: true,
+      });
+    } catch (err) {
+      console.warn("Failed to send schema context:", err);
+    }
+  }
+
+  sendToolResult(toolCallId: string, toolName: string, result: Record<string, unknown>): void {
+    try {
+      this.session?.sendToolResponse({
+        functionResponses: [{ id: toolCallId, name: toolName, response: result }],
+      });
+    } catch (err) {
+      console.warn("Failed to send tool result to Gemini:", err);
+    }
   }
 
   sendUiContext(uiContext: unknown): void {

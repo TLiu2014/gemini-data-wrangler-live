@@ -107,6 +107,7 @@ export function handleToolCall(
   socket: WebSocket,
   name: string,
   args: Record<string, unknown>,
+  toolCallId?: string,
 ): Record<string, unknown> {
   switch (name) {
     case "addReactFlowNode": {
@@ -120,14 +121,18 @@ export function handleToolCall(
     }
 
     case "executeDataTransform": {
-      const action: ExecuteSqlAction = {
-        action: "EXECUTE_SQL",
-        sql: args.sql as string,
-        description: args.description as string,
+      const msg: WsMessage = {
+        type: "sql",
+        payload: {
+          action: "EXECUTE_SQL",
+          sql: args.sql as string,
+          description: args.description as string,
+          toolCallId: toolCallId ?? undefined,
+        },
       };
-      const msg: WsMessage = { type: "sql", payload: action };
       socket.send(JSON.stringify(msg));
-      return { success: true, sql: action.sql };
+      // Response is deferred — frontend will send tool_result back
+      return { success: true, sql: args.sql };
     }
 
     case "renderChart": {

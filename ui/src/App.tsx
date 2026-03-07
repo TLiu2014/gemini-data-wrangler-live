@@ -16,6 +16,7 @@ import ChartView from "./components/ChartView.js";
 import TableTabs from "./components/TableTabs.js";
 import StageConfigDialog from "./components/StageConfigDialog.js";
 import type { StageConfig } from "./utils/sqlGenerator.js";
+import { SAMPLE_CUSTOMERS_CSV, SAMPLE_ORDERS_CSV } from "./sampleData.js";
 
 export default function App() {
   const flowRef = useRef<FlowPaneHandle>(null);
@@ -52,6 +53,30 @@ export default function App() {
     localStorage.setItem("start_mic_muted", muted ? "true" : "false");
   }, []);
 
+  // Sample data & flow
+  const [useSampleData, setUseSampleData] = useState(() =>
+    localStorage.getItem("use_sample_data") === "true",
+  );
+  const [useSampleFlow, setUseSampleFlow] = useState(() =>
+    localStorage.getItem("use_sample_flow") === "true",
+  );
+  const handleUseSampleDataChange = useCallback((use: boolean) => {
+    setUseSampleData(use);
+    localStorage.setItem("use_sample_data", use ? "true" : "false");
+    if (!use) {
+      setUseSampleFlow(false);
+      localStorage.setItem("use_sample_flow", "false");
+    }
+  }, []);
+  const handleUseSampleFlowChange = useCallback((use: boolean) => {
+    setUseSampleFlow(use);
+    localStorage.setItem("use_sample_flow", use ? "true" : "false");
+    if (use && !useSampleData) {
+      setUseSampleData(true);
+      localStorage.setItem("use_sample_data", "true");
+    }
+  }, [useSampleData]);
+
   // Mic permission
   const { state: micPermission, request: requestMic } = useMicPermission();
 
@@ -83,8 +108,10 @@ export default function App() {
     setActiveTableId,
     error: dbError,
     loadCSV,
+    loadCSVFromText,
     executeQuery,
     executeStage,
+    getSchemas,
   } = useDuckDB();
 
   const tableNameToIdRef = useRef<Map<string, string>>(new Map());
@@ -138,7 +165,43 @@ export default function App() {
           break;
       }
     },
-    onSql: (payload) => executeQuery(payload.sql),
+    onSql: async (payload) => {
+      const sqlPayload = payload as { sql: string; description?: string; toolCallId?: string };
+      setCurrentStatus(`Executing: ${sqlPayload.description ?? "SQL query"}...`);
+      try {
+        await executeQuery(sqlPayload.sql, sqlPayload.description);
+        // Send result summary back to backend for Gemini's tool response
+        if (sqlPayload.toolCallId) {
+          const tbl = tables.length > 0 ? tables[tables.length - 1] : null;
+          send({
+            type: "tool_result",
+            payload: {
+              toolCallId: sqlPayload.toolCallId,
+              toolName: "executeDataTransform",
+              result: {
+                success: true,
+                rowCount: tbl?.data.rows.length ?? 0,
+                columns: tbl?.data.columns ?? [],
+                sampleRows: tbl?.data.rows.slice(0, 3) ?? [],
+              },
+            },
+          });
+        }
+        addOperation(`Executed: ${sqlPayload.description ?? "SQL query"}`);
+      } catch (err) {
+        if (sqlPayload.toolCallId) {
+          send({
+            type: "tool_result",
+            payload: {
+              toolCallId: sqlPayload.toolCallId,
+              toolName: "executeDataTransform",
+              result: { success: false, error: String(err) },
+            },
+          });
+        }
+        addOperation(`Error: ${String(err)}`);
+      }
+    },
     onText: (payload) => {
       setGeminiTranscript((prev) => {
         const next = (prev + " " + payload.text).trim();
@@ -153,6 +216,64 @@ export default function App() {
     },
   });
 
+  // Load sample data on startup when enabled
+  const sampleLoadedRef = useRef(false);
+  // Reset guard when DB reinitializes (e.g. HMR)
+  useEffect(() => {
+    if (!dbReady) sampleLoadedRef.current = false;
+  }, [dbReady]);
+  useEffect(() => {
+    if (!useSampleData || !dbReady || sampleLoadedRef.current) return;
+    sampleLoadedRef.current = true;
+
+    (async () => {
+      setCurrentStatus("Loading sample data...");
+      const t1 = await loadCSVFromText("customers", SAMPLE_CUSTOMERS_CSV);
+      const t2 = await loadCSVFromText("orders", SAMPLE_ORDERS_CSV);
+
+      if (t1) {
+        flowRef.current?.addNode("load", "LOAD: customers", { tableName: "customers" });
+      }
+      if (t2) {
+        flowRef.current?.addNode("load", "LOAD: orders", { tableName: "orders" });
+      }
+
+      if (useSampleFlow && t1 && t2) {
+        const joinSql = `CREATE OR REPLACE TABLE customer_orders AS SELECT o.*, c.name, c.region, c.status FROM orders o INNER JOIN customers c ON o.customer_id = c.customer_id`;
+        const resultName = "customer_orders";
+        const joinNodeId = flowRef.current?.addNode("join", "JOIN", { deferEdges: true });
+        if (joinNodeId) {
+          try {
+            const tableName = await executeStage(joinSql, resultName);
+            if (tableName) {
+              flowRef.current?.updateNodeData(joinNodeId, {
+                tableName: resultName,
+                stageConfig: {
+                  type: "join",
+                  leftTable: "orders",
+                  rightTable: "customers",
+                  leftKey: "customer_id",
+                  rightKey: "customer_id",
+                  joinType: "INNER",
+                  resultName,
+                },
+              });
+              flowRef.current?.connectNode(joinNodeId, ["orders", "customers"]);
+            }
+          } catch (err) {
+            console.warn("Failed to execute sample join:", err);
+          }
+        }
+      }
+
+      const schemas = await getSchemas();
+      if (schemas) {
+        send({ type: "schema", payload: { schemas } });
+      }
+      setCurrentStatus("Sample data loaded.");
+    })();
+  }, [useSampleData, useSampleFlow, dbReady, loadCSVFromText, executeStage, getSchemas, send]);
+
   // Audio capture
   const onAudioChunk = useCallback(
     (base64: string) => send({ type: "audio", payload: { data: base64 } }),
@@ -161,13 +282,15 @@ export default function App() {
   const { micActive, start: startMic, stop: stopMic, analyser: micAnalyser } =
     useAudioCapture(onAudioChunk);
 
-  // Screenshot capture
-  const { start: startCapture, stop: stopCapture } = useScreenCapture(
-    useCallback(
-      (base64: string) => send({ type: "screenshot", payload: { data: base64 } }),
-      [send],
-    ),
-  );
+  // Screenshot capture — disabled for vision-free mode (saves API quota)
+  // const { start: startCapture, stop: stopCapture } = useScreenCapture(
+  //   useCallback(
+  //     (base64: string) => send({ type: "screenshot", payload: { data: base64 } }),
+  //     [send],
+  //   ),
+  // );
+  const startCapture = useCallback((_el: HTMLElement) => {}, []);
+  const stopCapture = useCallback(() => {}, []);
 
   // Auto mic permission on mount
   useEffect(() => {
@@ -219,8 +342,13 @@ export default function App() {
           addOperation(`Loaded ${file.name} as "${tableName}".`);
         }
       }
+      // Send updated schemas to the backend so Gemini knows about all loaded tables
+      const schemas = await getSchemas();
+      if (schemas) {
+        send({ type: "schema", payload: { schemas } });
+      }
     },
-    [loadCSV, addOperation],
+    [loadCSV, addOperation, getSchemas, send],
   );
 
   const flowSyncTimerRef = useRef<number | null>(null);
@@ -360,6 +488,10 @@ export default function App() {
         onDataLayoutChange={handleDataLayoutChange}
         startMicMuted={startMicMuted}
         onStartMicMutedChange={handleStartMicMutedChange}
+        useSampleData={useSampleData}
+        onUseSampleDataChange={handleUseSampleDataChange}
+        useSampleFlow={useSampleFlow}
+        onUseSampleFlowChange={handleUseSampleFlowChange}
       />
 
       {micPermission === "denied" && (
@@ -376,7 +508,7 @@ export default function App() {
             onToggleMic={handleToggleMic}
             onFileUpload={handleFileUpload}
             status={status}
-            tableCount={tables.length}
+            apiKey={apiKey}
             dbReady={dbReady}
             dbInitError={dbInitError}
             dbLoading={dbLoading}

@@ -10,7 +10,9 @@ export interface WsMessage {
     | "sql"
     | "status"
     | "text"
-    | "user_text";
+    | "user_text"
+    | "schema"
+    | "tool_result";
   payload: unknown;
 }
 
@@ -48,6 +50,22 @@ export function registerWebSocketRoutes(app: FastifyInstance) {
             case "screenshot": {
               const payload = msg.payload as { data: string };
               gemini?.sendScreenshot(payload.data);
+              break;
+            }
+
+            case "schema": {
+              const payload = msg.payload as { schemas: Record<string, string[]> };
+              gemini?.sendSchemaContext(payload.schemas);
+              break;
+            }
+
+            case "tool_result": {
+              const payload = msg.payload as {
+                toolCallId: string;
+                toolName: string;
+                result: Record<string, unknown>;
+              };
+              gemini?.sendToolResult(payload.toolCallId, payload.toolName, payload.result);
               break;
             }
 

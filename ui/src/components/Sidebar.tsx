@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import AudioVisualizer from "./AudioVisualizer.js";
 import FileUpload from "./FileUpload.js";
 import type { MicPermissionState } from "../hooks/useMicPermission.js";
@@ -8,7 +9,7 @@ interface SidebarProps {
   onToggleMic: () => void;
   onFileUpload: (files: File[]) => void;
   status: string;
-  tableCount: number;
+  apiKey: string;
   dbReady?: boolean;
   dbInitError?: string | null;
   dbLoading?: boolean;
@@ -19,13 +20,20 @@ interface SidebarProps {
   geminiTranscript: string;
 }
 
+function deriveAgentStatus(status: string, apiKey: string): { text: string; level: "ok" | "warn" | "error" | "off" } {
+  if (!apiKey) return { text: "API key missing — set in Settings", level: "warn" };
+  if (status === "connected") return { text: "Agent connected", level: "ok" };
+  if (status === "connecting") return { text: "Connecting...", level: "warn" };
+  return { text: "Disconnected", level: "off" };
+}
+
 export default function Sidebar({
   micActive,
   micPermission,
   onToggleMic,
   onFileUpload,
   status,
-  tableCount,
+  apiKey,
   dbReady = true,
   dbInitError = null,
   dbLoading = false,
@@ -35,6 +43,19 @@ export default function Sidebar({
   userTranscript,
   geminiTranscript,
 }: SidebarProps) {
+  const agentInfo = deriveAgentStatus(status, apiKey);
+
+  const userLogRef = useRef<HTMLDivElement>(null);
+  const geminiLogRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll transcript to bottom
+  useEffect(() => {
+    if (userLogRef.current) userLogRef.current.scrollTop = userLogRef.current.scrollHeight;
+  }, [userTranscript]);
+  useEffect(() => {
+    if (geminiLogRef.current) geminiLogRef.current.scrollTop = geminiLogRef.current.scrollHeight;
+  }, [geminiTranscript]);
+
   return (
     <>
       {/* File upload */}
@@ -55,59 +76,51 @@ export default function Sidebar({
             {dbError}
           </div>
         )}
-        {tableCount > 0 && (
-          <div className="table-badge">{tableCount} table{tableCount > 1 ? "s" : ""} loaded</div>
-        )}
       </div>
 
-      {/* Compact connection status */}
+      {/* Agent status */}
       <div className="status-indicator">
-        <span
-          className={`status-dot ${status === "connected" ? "on" : ""}`}
-        />
-        <span className="status-text">
-          {status === "connected"
-            ? "Connected"
-            : status === "connecting"
-              ? "Connecting..."
-              : "Disconnected"}
-        </span>
+        <span className={`status-dot ${agentInfo.level === "ok" ? "on" : agentInfo.level === "warn" ? "warn" : ""}`} />
+        <span className="status-text">{agentInfo.text}</span>
       </div>
 
-      {/* You section */}
-      <div className="voice-section">
-        <div className="voice-header">
-          <span className="voice-label">You</span>
-          {micActive && <span className="voice-live">Live</span>}
+      {/* Conversation area — fills remaining sidebar space */}
+      <div className="conversation-area">
+        {/* You section */}
+        <div className="voice-section">
+          <div className="voice-header">
+            <span className="voice-label">You</span>
+            {micActive && <span className="voice-live">Live</span>}
+          </div>
+          <AudioVisualizer
+            analyser={micAnalyser.current}
+            color={[66, 133, 244]}
+            colorEnd={[156, 39, 176]}
+            label=""
+            active={micActive}
+          />
+          <div className="voice-transcript" ref={userLogRef}>
+            {userTranscript || <span className="voice-placeholder">Start speaking — your words will appear here...</span>}
+          </div>
         </div>
-        <AudioVisualizer
-          analyser={micAnalyser.current}
-          color={[66, 133, 244]}
-          colorEnd={[156, 39, 176]}
-          label=""
-          active={micActive}
-        />
-        {userTranscript && (
-          <div className="voice-transcript">{userTranscript}</div>
-        )}
-      </div>
 
-      {/* Gemini section */}
-      <div className="voice-section">
-        <div className="voice-header">
-          <span className="voice-label">Gemini</span>
-          {status === "connected" && <span className="voice-live gemini">Active</span>}
+        {/* Gemini section */}
+        <div className="voice-section">
+          <div className="voice-header">
+            <span className="voice-label">Gemini</span>
+            {status === "connected" && <span className="voice-live gemini">Active</span>}
+          </div>
+          <AudioVisualizer
+            analyser={geminiAnalyser.current}
+            color={[156, 39, 176]}
+            colorEnd={[66, 133, 244]}
+            label=""
+            active={status === "connected"}
+          />
+          <div className="voice-transcript" ref={geminiLogRef}>
+            {geminiTranscript || <span className="voice-placeholder">Gemini's responses will appear here...</span>}
+          </div>
         </div>
-        <AudioVisualizer
-          analyser={geminiAnalyser.current}
-          color={[156, 39, 176]}
-          colorEnd={[66, 133, 244]}
-          label=""
-          active={status === "connected"}
-        />
-        {geminiTranscript && (
-          <div className="voice-transcript">{geminiTranscript}</div>
-        )}
       </div>
 
       {/* Mic toggle */}

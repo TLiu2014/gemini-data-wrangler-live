@@ -7,6 +7,10 @@ interface TopBarProps {
   onDataLayoutChange: (layout: "top-bottom" | "left-right") => void;
   startMicMuted: boolean;
   onStartMicMutedChange: (muted: boolean) => void;
+  useSampleData: boolean;
+  onUseSampleDataChange: (use: boolean) => void;
+  useSampleFlow: boolean;
+  onUseSampleFlowChange: (use: boolean) => void;
 }
 
 export default function TopBar({
@@ -16,6 +20,10 @@ export default function TopBar({
   onDataLayoutChange,
   startMicMuted,
   onStartMicMutedChange,
+  useSampleData,
+  onUseSampleDataChange,
+  useSampleFlow,
+  onUseSampleFlowChange,
 }: TopBarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [keyInput, setKeyInput] = useState(apiKey);
@@ -107,6 +115,32 @@ export default function TopBar({
                 <span>Start with mic muted</span>
               </label>
               <p className="settings-hint">When unchecked (default), mic is unmuted when the session starts.</p>
+            </div>
+
+            <div className="settings-section">
+              <label className="settings-label">Sample Data</label>
+              <label className="settings-checkbox-option">
+                <input
+                  type="checkbox"
+                  checked={useSampleData}
+                  onChange={(e) => onUseSampleDataChange(e.target.checked)}
+                />
+                <span>Load sample tables (customers + orders)</span>
+              </label>
+              <p className="settings-hint">Loads two sample CSV tables on startup.</p>
+            </div>
+
+            <div className="settings-section">
+              <label className="settings-label">Sample Flow</label>
+              <label className="settings-checkbox-option">
+                <input
+                  type="checkbox"
+                  checked={useSampleFlow}
+                  onChange={(e) => onUseSampleFlowChange(e.target.checked)}
+                />
+                <span>Load sample flow (2 loads + 1 join)</span>
+              </label>
+              <p className="settings-hint">Creates a sample pipeline with a JOIN stage. Requires sample data.</p>
             </div>
 
             <div className="settings-section">

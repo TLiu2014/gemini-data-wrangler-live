@@ -1,5 +1,7 @@
 import {
   ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
   Background,
   Controls,
   Panel,
@@ -31,20 +33,23 @@ import {
   useEffect,
 } from "react";
 
+const GEMINI_GRADIENT = "linear-gradient(135deg, #4285f4, #9c27b0)";
+const GEMINI_GRADIENT_MID = "#7b52c7"; // mid-point for flat contexts (edges, markers)
+
 const STAGE_COLORS: Record<string, string> = {
-  start: "#6b7280",
-  "csv-import": "#10b981",
-  load: "#10b981",
-  join: "#3b82f6",
-  union: "#8b5cf6",
-  filter: "#f59e0b",
-  group: "#ec4899",
-  aggregate: "#ec4899",
-  sort: "#06b6d4",
-  select: "#14b8a6",
-  transform: "#8b5cf6",
-  output: "#6b7280",
-  custom: "#6b7280",
+  start: "#4285f4",
+  "csv-import": "#34a853",
+  load: "#34a853",
+  join: "#fdd835",
+  union: "#ea80fc",
+  filter: "#ffb300",
+  group: "#f06292",
+  aggregate: "#f06292",
+  sort: "#26c6da",
+  select: "#26a69a",
+  transform: "#ea80fc",
+  output: "#78909c",
+  custom: GEMINI_GRADIENT_MID,
 };
 
 function getStageColor(nodeType: string): string {
@@ -77,16 +82,17 @@ function StageNodeCard(props: NodeProps) {
   const showExpand = !isStart && !isLoad;
   const config = data.stageConfig as StageConfig | undefined;
 
-  const minWidth = expanded ? 190 : 150;
+  const minWidth = expanded ? 160 : 120;
+  const isCustom = data.stageType.toUpperCase() === "CUSTOM";
 
   return (
     <div
       className="stage-node-card"
       style={{
-        background: "#ffffff",
-        border: `2px solid ${color}`,
-        borderRadius: 8,
-        padding: 6,
+        background: isCustom ? GEMINI_GRADIENT : "#ffffff",
+        border: isCustom ? "none" : `1.5px solid ${color}`,
+        borderRadius: 6,
+        padding: isCustom ? 1.5 : 5,
         boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
         minWidth,
         width: "100%",
@@ -94,23 +100,34 @@ function StageNodeCard(props: NodeProps) {
         position: "relative",
       }}
     >
+      {/* Inner white box for gradient-border effect on custom nodes */}
+      {isCustom && (
+        <div style={{
+          position: "absolute",
+          inset: 1.5,
+          background: "#ffffff",
+          borderRadius: 4.5,
+          zIndex: 0,
+        }} />
+      )}
       <NodeResizer
         isVisible={!!props.selected}
         minWidth={minWidth}
-        minHeight={36}
+        minHeight={30}
         lineStyle={{ border: "none" }}
         handleStyle={{ opacity: 0 }}
       />
       <Handle id="target-top" type="target" position={Position.Top} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
-      <Handle id="target-left" type="target" position={Position.Left} style={isStart || isLoad ? { ...HANDLE_STYLE_PASSTHROUGH, top: "50%" } : { ...HANDLE_STYLE, top: "50%" }} isConnectable={!isStart && !isLoad} />
-      <Handle id="target-right" type="target" position={Position.Right} style={isStart || isLoad ? { ...HANDLE_STYLE_PASSTHROUGH, top: "50%" } : { ...HANDLE_STYLE, top: "50%" }} isConnectable={!isStart && !isLoad} />
+      <Handle id="target-left" type="target" position={Position.Left} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
+      <Handle id="target-right" type="target" position={Position.Right} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
+      <div style={{ position: "relative", zIndex: 1, padding: isCustom ? 3.5 : 0 }}>
 
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          minHeight: 28,
+          gap: 5,
+          minHeight: 24,
         }}
       >
         <span
@@ -128,10 +145,16 @@ function StageNodeCard(props: NodeProps) {
         </span>
         {isStart ? (
           <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-            <strong style={{ color, fontSize: 12 }}>{data.stageType.toUpperCase()}</strong>
+            <strong style={{ color, fontSize: 11 }}>{data.stageType.toUpperCase()}</strong>
           </div>
         ) : (
-          <strong style={{ color, fontSize: 12, flexShrink: 0 }}>
+          <strong style={{
+            fontSize: 11,
+            flexShrink: 0,
+            ...(isCustom
+              ? { background: GEMINI_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontWeight: 700 }
+              : { color }),
+          }}>
             {data.stageType.toUpperCase()}
           </strong>
         )}
@@ -153,7 +176,7 @@ function StageNodeCard(props: NodeProps) {
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
-              maxWidth: expanded ? 100 : 60,
+              maxWidth: expanded ? 90 : 60,
             }}
             title={`Show table ${tableName}`}
           >
@@ -184,27 +207,27 @@ function StageNodeCard(props: NodeProps) {
         )}
       </div>
 
-      {expanded && config && (
-        <div className="stage-node-details" style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #e8eaed", fontSize: 10, color: "#5f6368" }}>
-          {config.type?.toUpperCase() === "JOIN" && (
+      {expanded && (config || isCustom) && (
+        <div className="stage-node-details" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #e8eaed", fontSize: 10, color: "#5f6368" }}>
+          {config?.type?.toUpperCase() === "JOIN" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <div><strong>Left:</strong> {config.leftTable} → {config.leftKey}</div>
               <div><strong>Right:</strong> {config.rightTable} → {config.rightKey}</div>
               {config.joinType && <div><strong>Type:</strong> {config.joinType}</div>}
             </div>
           )}
-          {config.type?.toUpperCase() === "UNION" && (
+          {config?.type?.toUpperCase() === "UNION" && (
             <div>
               <strong>Tables:</strong> {(config.unionTables ?? []).join(", ")}
               {config.unionType && ` (${config.unionType})`}
             </div>
           )}
-          {config.type?.toUpperCase() === "FILTER" && (
+          {config?.type?.toUpperCase() === "FILTER" && (
             <div>
               <strong>Where:</strong> {config.table}.{config.column} {config.operator} {String(config.value)}
             </div>
           )}
-          {config.type?.toUpperCase() === "GROUP" && (
+          {config?.type?.toUpperCase() === "GROUP" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <div><strong>Table:</strong> {config.groupTable}</div>
               <div><strong>Group by:</strong> {(config.groupByColumns ?? []).join(", ")}</div>
@@ -213,34 +236,37 @@ function StageNodeCard(props: NodeProps) {
               )}
             </div>
           )}
-          {config.type?.toUpperCase() === "SELECT" && (
+          {config?.type?.toUpperCase() === "SELECT" && (
             <div>
               <strong>Columns:</strong> {(config.selectColumns ?? []).join(", ")}
             </div>
           )}
-          {config.type?.toUpperCase() === "SORT" && (
+          {config?.type?.toUpperCase() === "SORT" && (
             <div>
               <strong>Order by:</strong> {config.sortTable}.{config.sortColumn} {config.sortDirection}
             </div>
           )}
-          {config.type?.toUpperCase() === "CUSTOM" && config.sql && (
+          {isCustom && (
             <div style={{ wordBreak: "break-all" }}>
-              <strong>SQL:</strong> {config.sql.slice(0, 80)}{config.sql.length > 80 ? "…" : ""}
+              {config?.sql ? (
+                <><strong>SQL:</strong> {config.sql.slice(0, 80)}{config.sql.length > 80 ? "…" : ""}</>
+              ) : (
+                <span style={{ fontStyle: "italic", color: "#9aa0a6" }}>No SQL defined — double-click to configure</span>
+              )}
             </div>
           )}
         </div>
       )}
 
+      </div>{/* end inner z-1 wrapper */}
       <Handle id="source-bottom" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
-      <Handle id="source-left" type="source" position={Position.Left} style={{ ...HANDLE_STYLE, top: "50%" }} />
-      <Handle id="source-right" type="source" position={Position.Right} style={{ ...HANDLE_STYLE, top: "50%" }} />
     </div>
   );
 }
 
 const HANDLE_STYLE = {
-  width: 10,
-  height: 10,
+  width: 8,
+  height: 8,
   borderRadius: "50%",
   border: "1px solid #9ca3af",
   background: "#ffffff",
@@ -357,13 +383,13 @@ function GradientConnectionLine(props: {
 /* ─── Add Stage menu options ─── */
 
 const STAGE_OPTIONS = [
-  { type: "JOIN", label: "Join", color: "#3b82f6" },
-  { type: "UNION", label: "Union", color: "#8b5cf6" },
-  { type: "FILTER", label: "Filter", color: "#f59e0b" },
-  { type: "GROUP", label: "Group", color: "#ec4899" },
-  { type: "SELECT", label: "Select", color: "#14b8a6" },
-  { type: "SORT", label: "Sort", color: "#06b6d4" },
-  { type: "CUSTOM", label: "Custom SQL", color: "#6b7280" },
+  { type: "JOIN", label: "Join", color: "#fdd835" },
+  { type: "UNION", label: "Union", color: "#ea80fc" },
+  { type: "FILTER", label: "Filter", color: "#ffb300" },
+  { type: "GROUP", label: "Group", color: "#f06292" },
+  { type: "SELECT", label: "Select", color: "#26a69a" },
+  { type: "SORT", label: "Sort", color: "#26c6da" },
+  { type: "CUSTOM", label: "Custom SQL", color: GEMINI_GRADIENT_MID, gradient: true },
 ];
 
 /* ─── Constants ─── */
@@ -450,13 +476,27 @@ function buildEdge(
 
 /* ─── Component ─── */
 
-export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
-  { onFlowChange, onShowTableByName, onConfigureStage, onNodeDeleted },
-  ref,
+/** Helper rendered inside <ReactFlow> to trigger fitView when nodes are added */
+function FitViewOnChange({ trigger }: { trigger: number }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (trigger === 0) return;
+    // Small delay so React Flow processes new nodes before fitting
+    const t = setTimeout(() => fitView({ padding: 0.3, duration: 300 }), 50);
+    return () => clearTimeout(t);
+  }, [trigger, fitView]);
+  return null;
+}
+
+function FlowPaneInner(
+  { onFlowChange, onShowTableByName, onConfigureStage, onNodeDeleted }: FlowPaneProps,
+  ref: React.ForwardedRef<FlowPaneHandle>,
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const idRef = useRef(1);
+  const fitTriggerRef = useRef(0);
+  const [fitTrigger, setFitTrigger] = useState(0);
   const [showStageMenu, setShowStageMenu] = useState(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -559,14 +599,36 @@ export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
         // Position
         let x: number, y: number;
         if (multiInput && sourceNodes.length >= 2) {
+          // Center between the two source nodes
           const xs = sourceNodes.map((n) => n.position.x);
           const ys = sourceNodes.map((n) => n.position.y);
           x = (Math.min(...xs) + Math.max(...xs)) / 2;
           y = Math.max(...ys) + 140;
+        } else if (isLoad) {
+          // Fan LOAD nodes symmetrically below their parent (START)
+          const parent = sourceNodes[0] ?? prevNodes.find((n) => n.id === "start");
+          const parentX = parent?.position.x ?? 100;
+          const parentY = parent?.position.y ?? 10;
+          const siblingLoads = prevNodes.filter((n) => {
+            const st = String((n.data as unknown as Partial<StageNodeData>)?.stageType ?? "").toLowerCase();
+            return st === "load" || st === "csv-import";
+          });
+          const count = siblingLoads.length; // 0-based index for this new one
+          const SPREAD = 200;
+          // 0 → left (-100), 1 → right (+100), 2 → further left (-300), 3 → further right (+300), ...
+          const tier = Math.floor(count / 2) + 1; // 1, 1, 2, 2, 3, ...
+          const sign = count % 2 === 0 ? -1 : 1; // left first, then right
+          x = parentX + sign * tier * (SPREAD / 2);
+          y = parentY + 120;
+        } else if (sourceNodes.length === 1) {
+          // Place directly below the single source
+          x = sourceNodes[0].position.x;
+          y = sourceNodes[0].position.y + 140;
         } else {
+          // Deferred or no source — place below the last node, centered
           const lastNode = prevNodes[prevNodes.length - 1];
-          x = (lastNode?.position.x ?? 100) + 50;
-          y = (lastNode?.position.y ?? 0) + 120;
+          x = lastNode?.position.x ?? 100;
+          y = (lastNode?.position.y ?? 0) + 140;
         }
 
         const newNode: Node = {
@@ -597,6 +659,7 @@ export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
         return allNodes;
       });
 
+      setFitTrigger(++fitTriggerRef.current);
       return id;
     },
     [setNodes, setEdges, onShowTableByName, onToggleExpand],
@@ -772,6 +835,7 @@ export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
         deleteKeyCode={["Backspace", "Delete"]}
         proOptions={{ hideAttribution: true }}
       >
+        <FitViewOnChange trigger={fitTrigger} />
         <Background color="#dadce0" gap={20} />
         <Controls />
         <Panel position="bottom-right" style={{ margin: 12 }}>
@@ -786,7 +850,7 @@ export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
                   >
                     <span
                       className="stage-dot"
-                      style={{ background: opt.color }}
+                      style={{ background: (opt as any).gradient ? GEMINI_GRADIENT : opt.color }}
                     />
                     {opt.label}
                   </button>
@@ -803,5 +867,15 @@ export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(
         </Panel>
       </ReactFlow>
     </div>
+  );
+}
+
+const FlowPaneWithRef = forwardRef<FlowPaneHandle, FlowPaneProps>(FlowPaneInner);
+
+export default forwardRef<FlowPaneHandle, FlowPaneProps>(function FlowPane(props, ref) {
+  return (
+    <ReactFlowProvider>
+      <FlowPaneWithRef ref={ref} {...props} />
+    </ReactFlowProvider>
   );
 });

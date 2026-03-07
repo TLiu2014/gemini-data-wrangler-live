@@ -58,15 +58,79 @@ export function useDuckDB() {
     setReady(true);
   }, []);
 
-  // Initialize DuckDB on mount so engine is ready before first upload
+  // Generation counter: incremented on cleanup so in-flight loads from a
+  // prior mount (React StrictMode double-invoke, HMR) silently abort instead
+  // of racing with the fresh mount and leaving a stale error in state.
+  const genRef = useRef(0);
+
+  // Initialize DuckDB on mount; terminate on unmount/HMR so stale virtual-FS state is cleared
   useEffect(() => {
     ensureInit()
       .then(() => setInitError(null))
       .catch((err) => setInitError(err instanceof Error ? err.message : String(err)));
+
+    return () => {
+      genRef.current++; // invalidate any in-flight loadCSVInternal calls
+      connRef.current?.close().catch(() => {});
+      dbRef.current?.terminate().catch(() => {});
+      connRef.current = null;
+      dbRef.current = null;
+      setReady(false);
+      setTables([]);
+      setActiveTableId(null);
+      setError(null);
+    };
   }, [ensureInit]);
 
-  // Keep registered file buffers alive so DuckDB's virtual FS can read them (avoid GC)
-  const fileBuffersRef = useRef<Map<string, Uint8Array>>(new Map());
+  const loadCSVInternal = useCallback(
+    async (name: string, csvText: string): Promise<string | null> => {
+      // Capture generation BEFORE the first await so any cleanup that runs
+      // during ensureInit's microtask yield is detected on the check below.
+      const capturedGen = genRef.current;
+
+      await ensureInit();
+      if (genRef.current !== capturedGen) return null; // stale – cleanup ran
+
+      const db = dbRef.current!;
+      const conn = connRef.current!;
+
+      const internalFileName = `table_${name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.csv`;
+
+      await db.registerFileText(internalFileName, csvText);
+      if (genRef.current !== capturedGen) return null;
+
+      await conn.query(`DROP TABLE IF EXISTS "${name}"`);
+      if (genRef.current !== capturedGen) return null;
+
+      await conn.insertCSVFromPath(internalFileName, {
+        name,
+        header: true,
+        detect: true,
+        create: true,
+      });
+      if (genRef.current !== capturedGen) return null;
+
+      const result = await conn.query(`SELECT * FROM "${name}" LIMIT 200`);
+      if (genRef.current !== capturedGen) return null;
+
+      const data = parseResult(result);
+
+      const tableInfo: TableInfo = { id: name, name, data };
+
+      setTables((prev) => {
+        const idx = prev.findIndex((t) => t.id === name);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = tableInfo;
+          return updated;
+        }
+        return [...prev, tableInfo];
+      });
+      setActiveTableId(name);
+      return name;
+    },
+    [ensureInit],
+  );
 
   const loadCSV = useCallback(
     async (file: File): Promise<string | null> => {
@@ -74,51 +138,37 @@ export function useDuckDB() {
       setLoading(true);
 
       try {
-        await ensureInit();
-        const db = dbRef.current!;
-        const conn = connRef.current!;
-
         const name = file.name
           .replace(/\.csv$/i, "")
           .replace(/[^a-zA-Z0-9_]/g, "_");
-        const internalFileName = `table_${name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.csv`;
-
-        // Use registerFileText + insertCSVFromPath (documented path); avoid read_csv_auto which
-        // can fail with "No files found" when the virtual FS isn't visible to the SQL engine.
         const text = await file.text();
-        await db.registerFileText(internalFileName, text);
-        await conn.query(`DROP TABLE IF EXISTS "${name}"`);
-        await conn.insertCSVFromPath(internalFileName, {
-          name,
-          header: true,
-          detect: true,
-          create: true,
-        });
-
-        const result = await conn.query(`SELECT * FROM "${name}" LIMIT 200`);
-        const data = parseResult(result);
-
-        const tableInfo: TableInfo = { id: name, name, data };
-
-        setTables((prev) => {
-          const idx = prev.findIndex((t) => t.id === name);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = tableInfo;
-            return updated;
-          }
-          return [...prev, tableInfo];
-        });
-        setActiveTableId(name);
+        const result = await loadCSVInternal(name, text);
         setLoading(false);
-        return name;
+        return result;
       } catch (err) {
         setError(String(err));
         setLoading(false);
         return null;
       }
     },
-    [ensureInit],
+    [loadCSVInternal],
+  );
+
+  const loadCSVFromText = useCallback(
+    async (name: string, csvText: string): Promise<string | null> => {
+      setError(null);
+      setLoading(true);
+      try {
+        const result = await loadCSVInternal(name, csvText);
+        setLoading(false);
+        return result;
+      } catch (err) {
+        setError(String(err));
+        setLoading(false);
+        return null;
+      }
+    },
+    [loadCSVInternal],
   );
 
   const executeQuery = useCallback(
@@ -189,6 +239,27 @@ export function useDuckDB() {
     [],
   );
 
+  const getSchemas = useCallback(async (): Promise<Record<string, string[]> | null> => {
+    const conn = connRef.current;
+    if (!conn || tables.length === 0) return null;
+    const schemas: Record<string, string[]> = {};
+    for (const t of tables) {
+      try {
+        const result = await conn.query(`DESCRIBE "${t.name}"`);
+        const cols: string[] = [];
+        for (let i = 0; i < result.numRows; i++) {
+          const name = result.getChild("column_name")?.get(i);
+          const type = result.getChild("column_type")?.get(i);
+          if (name) cols.push(`${name} (${type ?? "unknown"})`);
+        }
+        schemas[t.name] = cols;
+      } catch {
+        schemas[t.name] = t.data.columns;
+      }
+    }
+    return schemas;
+  }, [tables]);
+
   const activeTable = tables.find((t) => t.id === activeTableId) ?? null;
 
   return {
@@ -201,7 +272,9 @@ export function useDuckDB() {
     setActiveTableId,
     error,
     loadCSV,
+    loadCSVFromText,
     executeQuery,
     executeStage,
+    getSchemas,
   };
 }
