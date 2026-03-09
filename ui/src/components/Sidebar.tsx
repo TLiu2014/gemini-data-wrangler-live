@@ -1,29 +1,67 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import AudioVisualizer from "./AudioVisualizer.js";
 import FileUpload from "./FileUpload.js";
 import type { MicPermissionState } from "../hooks/useMicPermission.js";
+
+interface ChatMessage {
+  role: "user" | "gemini";
+  text: string;
+  thinking?: string;
+  ts: number;
+}
+
+function ChatBubble({ msg }: { msg: ChatMessage }) {
+  const [showThinking, setShowThinking] = useState(false);
+  const hasThinking = !!msg.thinking?.trim();
+  const hasText = !!msg.text.trim();
+
+  // Don't render empty bubbles
+  if (!hasText && !hasThinking) return null;
+
+  return (
+    <div className={`chat-bubble ${msg.role}`}>
+      <span className="chat-role">{msg.role === "user" ? "You" : "Gemini"}</span>
+      {hasText && <span className="chat-text">{msg.text}</span>}
+      {hasThinking && (
+        <button
+          className="thinking-toggle"
+          onClick={() => setShowThinking((v) => !v)}
+        >
+          {showThinking ? "Hide thinking" : "Show thinking"}
+        </button>
+      )}
+      {showThinking && hasThinking && (
+        <div className="thinking-content">{msg.thinking}</div>
+      )}
+    </div>
+  );
+}
 
 interface SidebarProps {
   micActive: boolean;
   micPermission: MicPermissionState;
   onToggleMic: () => void;
   onFileUpload: (files: File[]) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  autoConnect: boolean;
   status: string;
-  apiKey: string;
+  geminiError: string | null;
+  hasApiKey: boolean;
   dbReady?: boolean;
   dbInitError?: string | null;
   dbLoading?: boolean;
   dbError?: string | null;
   micAnalyser: React.RefObject<AnalyserNode | null>;
   geminiAnalyser: React.RefObject<AnalyserNode | null>;
-  userTranscript: string;
-  geminiTranscript: string;
+  chatLog: ChatMessage[];
 }
 
-function deriveAgentStatus(status: string, apiKey: string): { text: string; level: "ok" | "warn" | "error" | "off" } {
-  if (!apiKey) return { text: "API key missing — set in Settings", level: "warn" };
+function deriveAgentStatus(status: string, hasApiKey: boolean, geminiError: string | null): { text: string; level: "ok" | "warn" | "error" | "off" } {
+  if (!hasApiKey) return { text: "API key missing — set in Settings or .env", level: "warn" };
+  if (status === "error") return { text: geminiError ?? "Gemini session failed", level: "error" };
   if (status === "connected") return { text: "Agent connected", level: "ok" };
-  if (status === "connecting") return { text: "Connecting...", level: "warn" };
+  if (status === "connecting") return { text: "Connecting to Gemini...", level: "warn" };
   return { text: "Disconnected", level: "off" };
 }
 
@@ -32,29 +70,27 @@ export default function Sidebar({
   micPermission,
   onToggleMic,
   onFileUpload,
+  onConnect,
+  onDisconnect,
+  autoConnect,
   status,
-  apiKey,
+  geminiError,
+  hasApiKey,
   dbReady = true,
   dbInitError = null,
   dbLoading = false,
   dbError = null,
   micAnalyser,
   geminiAnalyser,
-  userTranscript,
-  geminiTranscript,
+  chatLog,
 }: SidebarProps) {
-  const agentInfo = deriveAgentStatus(status, apiKey);
+  const agentInfo = deriveAgentStatus(status, hasApiKey, geminiError);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const userLogRef = useRef<HTMLDivElement>(null);
-  const geminiLogRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll transcript to bottom
+  // Auto-scroll chat to bottom on new messages
   useEffect(() => {
-    if (userLogRef.current) userLogRef.current.scrollTop = userLogRef.current.scrollHeight;
-  }, [userTranscript]);
-  useEffect(() => {
-    if (geminiLogRef.current) geminiLogRef.current.scrollTop = geminiLogRef.current.scrollHeight;
-  }, [geminiTranscript]);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatLog]);
 
   return (
     <>
@@ -78,20 +114,36 @@ export default function Sidebar({
         )}
       </div>
 
+      {/* Connect / Disconnect (manual mode only) */}
+      {!autoConnect && (
+        <div className="sidebar-section connect-section">
+          {status === "connected" ? (
+            <button className="gemini-disconnect-btn" onClick={onDisconnect}>
+              Disconnect
+            </button>
+          ) : (
+            <button
+              className="gemini-connect-btn"
+              onClick={onConnect}
+              disabled={status === "connecting" || !hasApiKey}
+              title={!hasApiKey ? "Set your API key in Settings first" : undefined}
+            >
+              {status === "connecting" ? "Connecting..." : "Connect to Gemini"}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Agent status */}
       <div className="status-indicator">
-        <span className={`status-dot ${agentInfo.level === "ok" ? "on" : agentInfo.level === "warn" ? "warn" : ""}`} />
+        <span className={`status-dot ${agentInfo.level === "ok" ? "on" : agentInfo.level === "warn" ? "warn" : agentInfo.level === "error" ? "error" : ""}`} />
         <span className="status-text">{agentInfo.text}</span>
       </div>
 
-      {/* Conversation area — fills remaining sidebar space */}
-      <div className="conversation-area">
-        {/* You section */}
-        <div className="voice-section">
-          <div className="voice-header">
-            <span className="voice-label">You</span>
-            {micActive && <span className="voice-live">Live</span>}
-          </div>
+      {/* Audio visualizers */}
+      <div className="visualizer-row">
+        <div className="visualizer-item">
+          <span className="visualizer-label">You {micActive && <span className="voice-live">Live</span>}</span>
           <AudioVisualizer
             analyser={micAnalyser.current}
             color={[66, 133, 244]}
@@ -99,17 +151,9 @@ export default function Sidebar({
             label=""
             active={micActive}
           />
-          <div className="voice-transcript" ref={userLogRef}>
-            {userTranscript || <span className="voice-placeholder">Start speaking — your words will appear here...</span>}
-          </div>
         </div>
-
-        {/* Gemini section */}
-        <div className="voice-section">
-          <div className="voice-header">
-            <span className="voice-label">Gemini</span>
-            {status === "connected" && <span className="voice-live gemini">Active</span>}
-          </div>
+        <div className="visualizer-item">
+          <span className="visualizer-label">Gemini {status === "connected" && <span className="voice-live gemini">Active</span>}</span>
           <AudioVisualizer
             analyser={geminiAnalyser.current}
             color={[156, 39, 176]}
@@ -117,10 +161,20 @@ export default function Sidebar({
             label=""
             active={status === "connected"}
           />
-          <div className="voice-transcript" ref={geminiLogRef}>
-            {geminiTranscript || <span className="voice-placeholder">Gemini's responses will appear here...</span>}
-          </div>
         </div>
+      </div>
+
+      {/* Unified chat log */}
+      <div className="chat-log">
+        {chatLog.length === 0 && (
+          <span className="voice-placeholder">
+            Conversation will appear here...
+          </span>
+        )}
+        {chatLog.map((msg, i) => (
+          <ChatBubble key={i} msg={msg} />
+        ))}
+        <div ref={chatEndRef} />
       </div>
 
       {/* Mic toggle */}
@@ -132,8 +186,8 @@ export default function Sidebar({
         {micPermission === "denied"
           ? "Mic Blocked"
           : micActive
-            ? "Mute Mic"
-            : "Unmute Mic"}
+            ? "Mute"
+            : "Unmute"}
       </button>
     </>
   );

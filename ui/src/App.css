@@ -270,6 +270,56 @@ html, body, #root {
   background: #c5221f;
 }
 
+/* --- Connect / Disconnect buttons --- */
+.connect-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.gemini-connect-btn {
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, #4285f4, #9c27b0);
+  color: white;
+  transition: opacity 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 6px rgba(66, 133, 244, 0.35);
+  letter-spacing: 0.01em;
+}
+
+.gemini-connect-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  box-shadow: 0 3px 10px rgba(66, 133, 244, 0.45);
+}
+
+.gemini-connect-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.gemini-disconnect-btn {
+  width: 100%;
+  padding: 11px 16px;
+  border: 1.5px solid #dadce0;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #fff0f0;
+  color: #c5221f;
+  transition: background 0.2s;
+}
+
+.gemini-disconnect-btn:hover {
+  background: #fce8e6;
+}
+
 .mic-btn {
   padding: 10px;
   border: none;
@@ -731,51 +781,49 @@ table.data-table th {
   background: #f9ab00;
 }
 
+.status-dot.error {
+  background: #c5221f;
+}
+
 .status-text {
   font-size: 14px;
   color: #5f6368;
 }
 
-/* --- Conversation area (fills sidebar) --- */
-.conversation-area {
-  flex: 1;
+/* --- Visualizer row (compact side-by-side) --- */
+.visualizer-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-
-/* --- Voice section (wave + transcript) --- */
-.voice-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-height: 0;
-}
-
-.voice-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
-.voice-label {
-  font-size: 15px;
+.visualizer-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.visualizer-label {
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #5f6368;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .voice-live {
-  font-size: 12px;
-  padding: 2px 8px;
+  font-size: 10px;
+  padding: 1px 6px;
   border-radius: 4px;
   background: #e8f0fe;
   color: #4285f4;
   font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .voice-live.gemini {
@@ -783,22 +831,88 @@ table.data-table th {
   color: #9c27b0;
 }
 
-.voice-transcript {
-  font-size: 15px;
-  color: #202124;
-  background: #ffffff;
-  border: 1px solid #dadce0;
-  border-radius: 6px;
-  padding: 10px 12px;
+/* --- Chat log (fills sidebar, scrollable) --- */
+.chat-log {
   flex: 1;
-  min-height: 48px;
+  min-height: 0;
   overflow-y: auto;
-  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  max-width: 92%;
+  word-break: break-word;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  background: #e8f0fe;
+  color: #202124;
+  border-bottom-right-radius: 3px;
+}
+
+.chat-bubble.gemini {
+  align-self: flex-start;
+  background: #f3e8fd;
+  color: #202124;
+  border-bottom-left-radius: 3px;
+}
+
+.chat-role {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5f6368;
+}
+
+.chat-text {
+  white-space: pre-wrap;
+}
+
+.thinking-toggle {
+  background: none;
+  border: none;
+  color: #9aa0a6;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+  text-align: left;
+}
+
+.thinking-toggle:hover {
+  color: #5f6368;
+}
+
+.thinking-content {
+  font-size: 12px;
+  color: #5f6368;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .voice-placeholder {
   color: #9aa0a6;
   font-style: italic;
+  font-size: 14px;
+  padding: 8px 0;
 }
 
 /* --- Add Stage button + menu --- */

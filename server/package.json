@@ -4,15 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "lsof -ti:3001 | xargs kill -9 2>/dev/null; true",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
-    "fastify": "^5.2.0",
+    "@fastify/static": "^9.0.0",
     "@fastify/websocket": "^11.0.0",
-    "dotenv": "^16.4.0"
+    "@google/genai": "^1.0.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

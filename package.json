@@ -8,9 +8,9 @@
   "scripts": {
     "dev:frontend": "npm -w ui run dev",
     "dev:backend": "npm -w server run dev",
-    "dev": "concurrently --kill-others-on-fail --kill-signal SIGTERM \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev": "concurrently --kill-others-on-fail --kill-signal SIGINT \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "npm -w server run build && npm -w ui run build",
-    "start": "concurrently --kill-others-on-fail --kill-signal SIGTERM \"npm run dev:backend\" \"npm run dev:frontend\""
+    "start": "concurrently --kill-others-on-fail --kill-signal SIGINT \"npm run dev:backend\" \"npm run dev:frontend\""
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

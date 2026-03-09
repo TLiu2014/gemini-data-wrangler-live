@@ -39,6 +39,16 @@ export default function App() {
     setApiKey(key);
     sessionStorage.setItem("gemini_api_key", key);
   }, []);
+
+  // Check if the server already has an API key configured (e.g. via .env)
+  const [serverHasApiKey, setServerHasApiKey] = useState(false);
+  useEffect(() => {
+    fetch("/health")
+      .then((r) => r.json())
+      .then((d: { hasApiKey?: boolean }) => setServerHasApiKey(!!d.hasApiKey))
+      .catch(() => {});
+  }, []);
+  const hasApiKey = !!apiKey || serverHasApiKey;
   const handleDataLayoutChange = useCallback((layout: "top-bottom" | "left-right") => {
     setDataLayout(layout);
     localStorage.setItem("flow_data_layout", layout);
@@ -51,6 +61,15 @@ export default function App() {
   const handleStartMicMutedChange = useCallback((muted: boolean) => {
     setStartMicMuted(muted);
     localStorage.setItem("start_mic_muted", muted ? "true" : "false");
+  }, []);
+
+  // Auto-connect (default: true = previous behaviour)
+  const [autoConnect, setAutoConnect] = useState(() =>
+    localStorage.getItem("auto_connect") !== "false",
+  );
+  const handleAutoConnectChange = useCallback((auto: boolean) => {
+    setAutoConnect(auto);
+    localStorage.setItem("auto_connect", auto ? "true" : "false");
   }, []);
 
   // Sample data & flow
@@ -80,9 +99,14 @@ export default function App() {
   // Mic permission
   const { state: micPermission, request: requestMic } = useMicPermission();
 
-  // Transcripts (separate user / Gemini)
-  const [userTranscript, setUserTranscript] = useState("");
-  const [geminiTranscript, setGeminiTranscript] = useState("");
+  // Unified chat log
+  interface ChatMessage {
+    role: "user" | "gemini";
+    text: string;
+    thinking?: string;
+    ts: number;
+  }
+  const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
 
   // Stage config dialog
   const [configStage, setConfigStage] = useState<{
@@ -111,6 +135,7 @@ export default function App() {
     loadCSVFromText,
     executeQuery,
     executeStage,
+    dropTable,
     getSchemas,
   } = useDuckDB();
 
@@ -140,7 +165,7 @@ export default function App() {
   const { playChunk, stop: stopPlayback, analyser: geminiAnalyser } = useAudioPlayback();
 
   // WebSocket
-  const { status, connect, disconnect, send } = useWebSocket({
+  const { status, geminiError, connect, disconnect, send } = useWebSocket({
     onAudio: (payload) => playChunk(payload.data),
     onAction: (payload: ActionPayload) => {
       switch (payload.action) {
@@ -163,16 +188,100 @@ export default function App() {
             yKey: payload.yKey as string,
           });
           break;
+        case "REMOVE_NODE": {
+          const tableName = payload.tableName as string;
+          const toolCallId = payload.toolCallId as string | undefined;
+          const confirmed = window.confirm(
+            `Remove transformation "${tableName}"? This will drop the table and remove its node from the pipeline.`,
+          );
+          if (confirmed) {
+            (async () => {
+              const dropped = await dropTable(tableName);
+              if (dropped) {
+                flowRef.current?.removeNodeByTableName(tableName);
+                addOperation(`Removed transformation: ${tableName}`);
+              }
+              if (toolCallId) {
+                send({
+                  type: "tool_result",
+                  payload: {
+                    toolCallId,
+                    toolName: "removeTransform",
+                    result: dropped
+                      ? { success: true, removed: tableName }
+                      : { success: false, error: `Table "${tableName}" not found` },
+                  },
+                });
+              }
+            })();
+          } else {
+            if (toolCallId) {
+              send({
+                type: "tool_result",
+                payload: {
+                  toolCallId,
+                  toolName: "removeTransform",
+                  result: { success: false, error: "User cancelled the removal" },
+                },
+              });
+            }
+          }
+          break;
+        }
       }
     },
     onSql: async (payload) => {
       const sqlPayload = payload as { sql: string; description?: string; toolCallId?: string };
       setCurrentStatus(`Executing: ${sqlPayload.description ?? "SQL query"}...`);
       try {
-        await executeQuery(sqlPayload.sql, sqlPayload.description);
-        // Send result summary back to backend for Gemini's tool response
+        // Detect CREATE TABLE ... AS ... — use executeStage to show the resulting table
+        const createMatch = sqlPayload.sql.match(
+          /CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:"([^"]+)"|(\w+))/i,
+        );
+        let resultTableName: string | null = null;
+        if (createMatch) {
+          const tblName = createMatch[1] || createMatch[2];
+          resultTableName = await executeStage(sqlPayload.sql, tblName);
+        } else {
+          await executeQuery(sqlPayload.sql, sqlPayload.description);
+        }
+
+        // Auto-add a flow node for CREATE TABLE results
+        if (resultTableName) {
+          // Detect stage type from SQL keywords (match whole words, not substrings of table names)
+          const sqlNorm = sqlPayload.sql.replace(/"[^"]+"/g, "").replace(/'[^']+'/g, ""); // strip quoted identifiers
+          const stageType = /\bJOIN\b/i.test(sqlNorm) ? "join"
+            : /\bUNION\b/i.test(sqlNorm) ? "union"
+            : /\bWHERE\b/i.test(sqlNorm) ? "filter"
+            : /\bGROUP\s+BY\b/i.test(sqlNorm) ? "group"
+            : /\bORDER\s+BY\b/i.test(sqlNorm) ? "sort"
+            : "custom";
+          // addNode returns null if a node with this tableName already exists (dedup)
+          const nodeId = flowRef.current?.addNode(
+            stageType,
+            stageType.toUpperCase(),
+            { tableName: resultTableName, deferEdges: true },
+          ) ?? null;
+          if (nodeId) {
+            // Parse source tables from SQL (FROM / JOIN clauses)
+            const srcTables: string[] = [];
+            const fromMatch = sqlPayload.sql.match(/FROM\s+(?:"([^"]+)"|(\w+))/i);
+            if (fromMatch) srcTables.push(fromMatch[1] || fromMatch[2]);
+            const joinMatches = sqlPayload.sql.matchAll(/JOIN\s+(?:"([^"]+)"|(\w+))/gi);
+            for (const m of joinMatches) srcTables.push(m[1] || m[2]);
+            // Defer so the new node is in nodesRef after React re-renders
+            setTimeout(() => {
+              flowRef.current?.connectNode(nodeId, srcTables.length > 0 ? srcTables : undefined);
+            }, 80);
+          }
+        }
+
+        // Send result summary back to Gemini
         if (sqlPayload.toolCallId) {
-          const tbl = tables.length > 0 ? tables[tables.length - 1] : null;
+          // Pick the freshest table from state (executeStage/executeQuery just updated it)
+          const tbl = resultTableName
+            ? tables.find((t) => t.name === resultTableName) ?? tables[tables.length - 1]
+            : tables[tables.length - 1];
           send({
             type: "tool_result",
             payload: {
@@ -180,6 +289,7 @@ export default function App() {
               toolName: "executeDataTransform",
               result: {
                 success: true,
+                tableName: resultTableName ?? sqlPayload.description ?? "query_result",
                 rowCount: tbl?.data.rows.length ?? 0,
                 columns: tbl?.data.columns ?? [],
                 sampleRows: tbl?.data.rows.slice(0, 3) ?? [],
@@ -203,16 +313,38 @@ export default function App() {
       }
     },
     onText: (payload) => {
-      setGeminiTranscript((prev) => {
-        const next = (prev + " " + payload.text).trim();
-        return next.length > 500 ? next.slice(-500) : next;
+      setChatLog((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "gemini") {
+          return [...prev.slice(0, -1), { ...last, text: last.text + payload.text }];
+        }
+        return [...prev, { role: "gemini", text: payload.text, ts: Date.now() }];
       });
     },
     onUserText: (payload) => {
-      setUserTranscript((prev) => {
-        const next = (prev + " " + payload.text).trim();
-        return next.length > 500 ? next.slice(-500) : next;
+      setChatLog((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "user") {
+          return [...prev.slice(0, -1), { ...last, text: last.text + payload.text }];
+        }
+        return [...prev, { role: "user", text: payload.text, ts: Date.now() }];
       });
+    },
+    onThinking: (payload) => {
+      setChatLog((prev) => {
+        const last = prev[prev.length - 1];
+        // Append thinking to the latest Gemini message, or create a new one
+        if (last?.role === "gemini") {
+          return [...prev.slice(0, -1), { ...last, thinking: (last.thinking ?? "") + payload.text }];
+        }
+        return [...prev, { role: "gemini", text: "", thinking: payload.text, ts: Date.now() }];
+      });
+    },
+    onRequestSchemas: async () => {
+      const schemas = await getSchemas();
+      if (schemas) {
+        send({ type: "schema", payload: { schemas } });
+      }
     },
   });
 
@@ -297,19 +429,55 @@ export default function App() {
     if (micPermission === "prompt") requestMic();
   }, [micPermission, requestMic]);
 
-  // Auto-connect WS
+  // Auto-connect on mount when enabled
   const hasAutoConnected = useRef(false);
   useEffect(() => {
-    if (!hasAutoConnected.current) {
-      hasAutoConnected.current = true;
-      connect();
-    }
+    if (!autoConnect || hasAutoConnected.current) return;
+    hasAutoConnected.current = true;
+    connect();
+  }, [autoConnect, connect]);
+
+  // Manual connect / disconnect
+  const manualConnectRef = useRef(false);
+  const handleConnect = useCallback(() => {
+    // Reset auto-start guard so mic will auto-unmute once Gemini connects
+    hasAutoStartedMic.current = false;
+    manualConnectRef.current = true;
+    connect();
   }, [connect]);
+
+  const handleDisconnect = useCallback(() => {
+    if (micActive) {
+      stopMic();
+      stopCapture();
+    }
+    stopPlayback();
+    disconnect();
+  }, [disconnect, micActive, stopMic, stopCapture, stopPlayback]);
+
+  // Stop mic when Gemini disconnects (error, timeout, etc.)
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current === "connected" && status !== "connected" && micActive) {
+      stopMic();
+      stopCapture();
+      stopPlayback();
+    }
+    prevStatusRef.current = status;
+  }, [status, micActive, stopMic, stopCapture, stopPlayback]);
 
   // Auto-start mic once permission granted + connected (unless "start with mic muted" is set)
   const hasAutoStartedMic = useRef(false);
   useEffect(() => {
-    if (startMicMuted) return;
+    // Allow auto-start again after disconnect/manual mute cycles.
+    if (status !== "connected") {
+      hasAutoStartedMic.current = false;
+    }
+  }, [status]);
+
+  useEffect(() => {
+    // Skip auto-start if "start mic muted" is set AND this is not a manual connect
+    if (startMicMuted && !manualConnectRef.current) return;
     if (
       micPermission === "granted" &&
       status === "connected" &&
@@ -317,20 +485,34 @@ export default function App() {
       !hasAutoStartedMic.current
     ) {
       hasAutoStartedMic.current = true;
-      startMic();
-      if (appRef.current) startCapture(appRef.current);
+      manualConnectRef.current = false;
+      void (async () => {
+        try {
+          await startMic();
+          if (appRef.current) startCapture(appRef.current);
+        } catch (err) {
+          hasAutoStartedMic.current = false;
+          addOperation(`Mic start failed: ${String(err)}`);
+        }
+      })();
     }
-  }, [startMicMuted, micPermission, status, micActive, startMic, startCapture]);
+  }, [startMicMuted, micPermission, status, micActive, startMic, startCapture, addOperation]);
 
   const handleToggleMic = useCallback(() => {
     if (micActive) {
       stopMic();
       stopCapture();
     } else {
-      startMic();
-      if (appRef.current) startCapture(appRef.current);
+      void (async () => {
+        try {
+          await startMic();
+          if (appRef.current) startCapture(appRef.current);
+        } catch (err) {
+          addOperation(`Mic start failed: ${String(err)}`);
+        }
+      })();
     }
-  }, [micActive, startMic, stopMic, startCapture, stopCapture]);
+  }, [micActive, startMic, stopMic, startCapture, stopCapture, addOperation]);
 
   const handleFileUpload = useCallback(
     async (files: File[]) => {
@@ -492,6 +674,8 @@ export default function App() {
         onUseSampleDataChange={handleUseSampleDataChange}
         useSampleFlow={useSampleFlow}
         onUseSampleFlowChange={handleUseSampleFlowChange}
+        autoConnect={autoConnect}
+        onAutoConnectChange={handleAutoConnectChange}
       />
 
       {micPermission === "denied" && (
@@ -507,16 +691,19 @@ export default function App() {
             micPermission={micPermission}
             onToggleMic={handleToggleMic}
             onFileUpload={handleFileUpload}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            autoConnect={autoConnect}
             status={status}
-            apiKey={apiKey}
+            geminiError={geminiError}
+            hasApiKey={hasApiKey}
             dbReady={dbReady}
             dbInitError={dbInitError}
             dbLoading={dbLoading}
             dbError={dbError}
             micAnalyser={micAnalyser}
             geminiAnalyser={geminiAnalyser}
-            userTranscript={userTranscript}
-            geminiTranscript={geminiTranscript}
+            chatLog={chatLog}
           />
         </aside>
         <div className="resize-handle" onMouseDown={handleSidebarMouseDown} />

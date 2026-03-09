@@ -11,6 +11,8 @@ interface TopBarProps {
   onUseSampleDataChange: (use: boolean) => void;
   useSampleFlow: boolean;
   onUseSampleFlowChange: (use: boolean) => void;
+  autoConnect: boolean;
+  onAutoConnectChange: (auto: boolean) => void;
 }
 
 export default function TopBar({
@@ -24,6 +26,8 @@ export default function TopBar({
   onUseSampleDataChange,
   useSampleFlow,
   onUseSampleFlowChange,
+  autoConnect,
+  onAutoConnectChange,
 }: TopBarProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [keyInput, setKeyInput] = useState(apiKey);
@@ -102,6 +106,19 @@ export default function TopBar({
                   aistudio.google.com
                 </a>
               </p>
+            </div>
+
+            <div className="settings-section">
+              <label className="settings-label">Connection</label>
+              <label className="settings-checkbox-option">
+                <input
+                  type="checkbox"
+                  checked={autoConnect}
+                  onChange={(e) => onAutoConnectChange(e.target.checked)}
+                />
+                <span>Auto-connect on load</span>
+              </label>
+              <p className="settings-hint">When unchecked, use the Connect button in the sidebar to start a Gemini session manually (saves free-tier quota).</p>
             </div>
 
             <div className="settings-section">

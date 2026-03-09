@@ -25,7 +25,12 @@ export interface RenderChartAction {
   yKey: string;
 }
 
-export type AgentAction = AddNodeAction | ExecuteSqlAction | RenderChartAction;
+export interface RemoveNodeAction {
+  action: "REMOVE_NODE";
+  tableName: string;
+}
+
+export type AgentAction = AddNodeAction | ExecuteSqlAction | RenderChartAction | RemoveNodeAction;
 
 // ---------------------------------------------------------------------------
 // Tool declarations for Gemini function calling
@@ -70,6 +75,21 @@ export function getToolDeclarations(): FunctionDeclaration[] {
           },
         },
         required: ["sql", "description"],
+      },
+    },
+    {
+      name: "removeTransform",
+      description:
+        "Remove a previously created transformation table and its node from the pipeline. Use this when the user asks to undo, remove, or redo a transformation. IMPORTANT: Always confirm with the user verbally BEFORE calling this tool.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          tableName: {
+            type: Type.STRING,
+            description: "The name of the result table to remove (e.g. 'customer_orders')",
+          },
+        },
+        required: ["tableName"],
       },
     },
     {
@@ -133,6 +153,20 @@ export function handleToolCall(
       socket.send(JSON.stringify(msg));
       // Response is deferred — frontend will send tool_result back
       return { success: true, sql: args.sql };
+    }
+
+    case "removeTransform": {
+      const msg: WsMessage = {
+        type: "action",
+        payload: {
+          action: "REMOVE_NODE",
+          tableName: args.tableName as string,
+          toolCallId: toolCallId ?? undefined,
+        },
+      };
+      socket.send(JSON.stringify(msg));
+      // Response is deferred — frontend will confirm with user and send tool_result back
+      return { success: true, tableName: args.tableName };
     }
 
     case "renderChart": {

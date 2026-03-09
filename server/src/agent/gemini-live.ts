@@ -3,24 +3,36 @@ import type { WebSocket } from "@fastify/websocket";
 import type { WsMessage } from "../ws.js";
 import { getToolDeclarations, handleToolCall } from "./tools.js";
 
-const GEMINI_MODEL = "gemini-2.0-flash-live-001";
+// Google AI Studio (free tier) model ID for Gemini 2.5 Flash Multimodal Live API.
+// If this throws "model not found", check AI Studio docs for the latest month suffix.
+// Vertex AI GA equivalent: "gemini-live-2.5-flash-native-audio"
+const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 
 const SYSTEM_INSTRUCTION = `You are a data wrangling assistant inside a visual pipeline editor.
-The user talks to you via voice.
+The user talks to you via voice. Always respond in English.
 You do NOT have vision — you rely on table schemas and text context the user provides.
-You may receive:
-- Table schemas describing loaded CSV data (table names, column names, and types)
-- Structured UI context as text updates describing node/edge edits
+
+You will receive [DATA CONTEXT] messages containing table schemas (table names, column names, and types).
+Use these schemas to understand the user's data WITHOUT asking them to describe it.
 
 You have tools to:
-- Add nodes to the pipeline graph (CSV import, filter, transform, output, join, union)
-- Execute SQL queries against the user's data via DuckDB (running locally in the browser)
+- Execute SQL queries against the user's data via DuckDB (running locally in the browser) — this AUTOMATICALLY creates pipeline nodes in the UI, so do NOT also call addReactFlowNode for the same operation.
+- Add nodes to the pipeline graph manually (only use addReactFlowNode for non-SQL operations like CSV import)
 - Render charts from the data
+- Remove transformations (undo)
 
-When the user asks you to manipulate data or the pipeline, use your tools.
-When you use executeDataTransform, the SQL runs in the user's browser via DuckDB-WASM. You will receive the query results (row count, sample rows, or errors) as a tool response so you can summarize them for the user.
-For JOIN queries, use standard SQL: CREATE TABLE result AS SELECT ... FROM t1 JOIN t2 ON t1.key = t2.key.
-Be concise in your spoken responses — the user is watching the UI update in real time.`;
+IMPORTANT RULES:
+- When the user asks you to manipulate data, ACT IMMEDIATELY using your tools. Do NOT ask clarifying questions if the schema context gives you enough information.
+- For JOINs: inspect the schemas to find matching column names between tables (e.g. customer_id in both). Use standard SQL: CREATE OR REPLACE TABLE result_name AS SELECT ... FROM t1 JOIN t2 ON t1.key = t2.key. Pick sensible defaults (INNER JOIN, select all columns). Only call executeDataTransform — do NOT also call addReactFlowNode (the node is created automatically).
+- TOOL USAGE: When you call executeDataTransform with CREATE TABLE, the UI automatically creates a pipeline node (join, filter, etc.) based on the SQL. Do NOT call addReactFlowNode for the same transformation. Only use addReactFlowNode for non-SQL operations (e.g. manually adding an empty stage).
+- Write simple, straightforward SQL. Do NOT worry about data type serialization, casting, or BigInt issues — the runtime handles type conversions automatically. Never try to cast columns to work around serialization errors.
+- If a query returns an error, try a simpler version of the query instead of adding complex type casts.
+- When you use executeDataTransform, the SQL runs in DuckDB-WASM in the user's browser. You will receive the query results (row count, columns, sample rows, or errors) as a tool response so you can summarize them.
+- Be concise in your spoken responses — the user is watching the UI update in real time.
+- Do not say "unknown" about the data. You always have the latest schema context.
+- RESULT TABLE NAMING: When creating tables with CREATE TABLE, use descriptive snake_case names that reflect the operation. For example: "customer_orders_join", "filtered_active_customers", "orders_by_region". NEVER overwrite or reuse source table names.
+- UNDO / REDO: When the user asks to undo, remove, or redo a transformation, use removeTransform with the table name. Always confirm with the user VERBALLY before calling removeTransform. For redo, remove the old result first, then re-execute the transform.
+- LANGUAGE: This app supports English only. If the user speaks in another language (e.g. Chinese/Mandarin), respond briefly in English saying "I only support English for now, please speak in English." and do not attempt to process the non-English request.`;
 
 export class GeminiLiveSession {
   private session: Session | null = null;
@@ -39,6 +51,7 @@ export class GeminiLiveSession {
       model: GEMINI_MODEL,
       config: {
         responseModalities: [Modality.AUDIO],
+        speechConfig: { languageCode: "en-US" },
         systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
         tools: [{ functionDeclarations: getToolDeclarations() }],
         inputAudioTranscription: {},
@@ -48,6 +61,8 @@ export class GeminiLiveSession {
         onopen: () => {
           console.log("Gemini Live session opened");
           this.sendToClient({ type: "status", payload: { gemini: "connected" } });
+          // Ask frontend to send current table schemas so Gemini has context
+          this.sendToClient({ type: "status", payload: { requestSchemas: true } });
         },
         onmessage: (msg) => {
           this.handleGeminiMessage(msg);
@@ -81,13 +96,13 @@ export class GeminiLiveSession {
       }
     }
 
-    // Text response (for debugging / fallback)
+    // Model thinking / reasoning text (not spoken aloud)
     const textParts = msg.serverContent?.modelTurn?.parts?.filter(
       (p: any) => p.text,
     );
     if (textParts?.length) {
       for (const part of textParts) {
-        this.sendToClient({ type: "text", payload: { text: part.text } });
+        this.sendToClient({ type: "thinking", payload: { text: part.text } });
       }
     }
 
@@ -110,8 +125,8 @@ export class GeminiLiveSession {
     if (toolCalls?.length) {
       const immediateResponses: any[] = [];
       for (const call of toolCalls) {
-        if (call.name === "executeDataTransform") {
-          // Defer: send SQL to frontend for execution; frontend will return results via tool_result
+        if (call.name === "executeDataTransform" || call.name === "removeTransform") {
+          // Defer: send to frontend for execution; frontend will return results via tool_result
           handleToolCall(this.clientSocket, call.name, call.args, call.id);
         } else {
           const result = handleToolCall(this.clientSocket, call.name, call.args);

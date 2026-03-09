@@ -413,9 +413,10 @@ export interface FlowPaneHandle {
     nodeType: string,
     label?: string,
     options?: { tableName?: string; sourceIds?: string[]; deferEdges?: boolean },
-  ) => string;
+  ) => string | null;
   updateNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
   connectNode: (nodeId: string, sourceTableNames?: string[]) => void;
+  removeNodeByTableName: (tableName: string) => boolean;
 }
 
 export interface FlowSnapshot {
@@ -557,7 +558,7 @@ function FlowPaneInner(
   }, [nodes, edges, onFlowChange]);
 
   const addNode = useCallback(
-    (nodeType: string, label?: string, options?: { tableName?: string; sourceIds?: string[]; deferEdges?: boolean }): string => {
+    (nodeType: string, label?: string, options?: { tableName?: string; sourceIds?: string[]; deferEdges?: boolean }): string | null => {
       const displayLabel = label || nodeType;
       const normalized = nodeType.toLowerCase();
       const derivedTableName =
@@ -565,6 +566,15 @@ function FlowPaneInner(
         (normalized === "load" && displayLabel.startsWith("LOAD: ")
           ? displayLabel.replace(/^LOAD:\s*/, "")
           : undefined);
+
+      // Dedup: if a node with this tableName already exists, skip
+      if (derivedTableName) {
+        const existing = nodesRef.current.find((n) => {
+          const d = n.data as unknown as StageNodeData;
+          return d.tableName === derivedTableName;
+        });
+        if (existing) return null;
+      }
 
       const id = `node-${idRef.current++}`;
       const isLoad = normalized === "load" || normalized === "csv-import";
@@ -708,6 +718,22 @@ function FlowPaneInner(
     [setEdges],
   );
 
+  const removeNodeByTableName = useCallback(
+    (tableName: string): boolean => {
+      const currentNodes = nodesRef.current;
+      const node = currentNodes.find((n) => {
+        const d = n.data as unknown as StageNodeData;
+        return d.tableName === tableName;
+      });
+      if (!node) return false;
+      const nodeId = node.id;
+      setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+      setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      return true;
+    },
+    [setNodes, setEdges],
+  );
+
   const handleBeforeDelete = useCallback(
     async ({ nodes: toDelete }: { nodes: Node[]; edges: Edge[] }) => {
       if (toDelete.length === 0) return true;
@@ -803,12 +829,12 @@ function FlowPaneInner(
     (type: string) => {
       setShowStageMenu(false);
       const nodeId = addNode(type, type, { deferEdges: true });
-      onConfigureStage?.(nodeId, type);
+      if (nodeId) onConfigureStage?.(nodeId, type);
     },
     [addNode, onConfigureStage],
   );
 
-  useImperativeHandle(ref, () => ({ addNode, updateNodeData, connectNode }), [addNode, updateNodeData, connectNode]);
+  useImperativeHandle(ref, () => ({ addNode, updateNodeData, connectNode, removeNodeByTableName }), [addNode, updateNodeData, connectNode, removeNodeByTableName]);
 
   return (
     <div className="flow-pane-inner">

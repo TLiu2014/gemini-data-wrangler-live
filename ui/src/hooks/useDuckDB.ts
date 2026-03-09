@@ -33,7 +33,13 @@ export function useDuckDB() {
       const row: Record<string, unknown> = {};
       for (const col of columns) {
         const vec = result.getChild(col);
-        row[col] = vec?.get(i);
+        let val = vec?.get(i);
+        // DuckDB-WASM returns BigInt for integer types — convert to Number
+        // so the value is JSON-serialisable (sent back to Gemini as tool result).
+        if (typeof val === "bigint") {
+          val = Number(val);
+        }
+        row[col] = val;
       }
       rows.push(row);
     }
@@ -87,47 +93,74 @@ export function useDuckDB() {
       // Capture generation BEFORE the first await so any cleanup that runs
       // during ensureInit's microtask yield is detected on the check below.
       const capturedGen = genRef.current;
+      const isStale = () => genRef.current !== capturedGen;
 
       await ensureInit();
-      if (genRef.current !== capturedGen) return null; // stale – cleanup ran
+      if (isStale()) return null;
 
       const db = dbRef.current!;
       const conn = connRef.current!;
 
       const internalFileName = `table_${name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.csv`;
 
-      await db.registerFileText(internalFileName, csvText);
-      if (genRef.current !== capturedGen) return null;
+      // Wrap DuckDB operations so that errors from a terminated (stale)
+      // instance are silently ignored instead of surfacing to the UI.
+      try {
+        await db.registerFileText(internalFileName, csvText);
+        if (isStale()) return null;
 
-      await conn.query(`DROP TABLE IF EXISTS "${name}"`);
-      if (genRef.current !== capturedGen) return null;
+        await conn.query(`DROP TABLE IF EXISTS "${name}"`);
+        if (isStale()) return null;
 
-      await conn.insertCSVFromPath(internalFileName, {
-        name,
-        header: true,
-        detect: true,
-        create: true,
-      });
-      if (genRef.current !== capturedGen) return null;
-
-      const result = await conn.query(`SELECT * FROM "${name}" LIMIT 200`);
-      if (genRef.current !== capturedGen) return null;
-
-      const data = parseResult(result);
-
-      const tableInfo: TableInfo = { id: name, name, data };
-
-      setTables((prev) => {
-        const idx = prev.findIndex((t) => t.id === name);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = tableInfo;
-          return updated;
+        // DuckDB-WASM can intermittently lose a just-registered virtual file
+        // during rapid reload/re-init flows. Retry once after re-registering.
+        let inserted = false;
+        for (let attempt = 0; attempt < 2 && !inserted; attempt++) {
+          try {
+            await conn.insertCSVFromPath(internalFileName, {
+              name,
+              header: true,
+              detect: true,
+              create: true,
+            });
+            inserted = true;
+          } catch (err) {
+            const msg = String(err);
+            const noFileMatch = msg.includes("No files found that match the pattern");
+            if (attempt === 0 && noFileMatch) {
+              await db.registerFileText(internalFileName, csvText);
+              if (isStale()) return null;
+              continue;
+            }
+            throw err;
+          }
         }
-        return [...prev, tableInfo];
-      });
-      setActiveTableId(name);
-      return name;
+        if (isStale()) return null;
+
+        const result = await conn.query(`SELECT * FROM "${name}" LIMIT 200`);
+        if (isStale()) return null;
+
+        const data = parseResult(result);
+
+        const tableInfo: TableInfo = { id: name, name, data };
+
+        setTables((prev) => {
+          const idx = prev.findIndex((t) => t.id === name);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = tableInfo;
+            return updated;
+          }
+          return [...prev, tableInfo];
+        });
+        setActiveTableId(name);
+        return name;
+      } catch (err) {
+        // If the generation changed, this error is from a stale DB instance
+        // (HMR / StrictMode double-mount) — ignore it silently.
+        if (isStale()) return null;
+        throw err; // real error — let caller handle it
+      }
     },
     [ensureInit],
   );
@@ -159,7 +192,8 @@ export function useDuckDB() {
       setError(null);
       setLoading(true);
       try {
-        const result = await loadCSVInternal(name, csvText);
+        const safeName = name.replace(/[^a-zA-Z0-9_]/g, "_");
+        const result = await loadCSVInternal(safeName, csvText);
         setLoading(false);
         return result;
       } catch (err) {
@@ -239,6 +273,22 @@ export function useDuckDB() {
     [],
   );
 
+  const dropTable = useCallback(
+    async (tableName: string): Promise<boolean> => {
+      const conn = connRef.current;
+      if (!conn) return false;
+      try {
+        await conn.query(`DROP TABLE IF EXISTS "${tableName}"`);
+        setTables((prev) => prev.filter((t) => t.name !== tableName));
+        return true;
+      } catch (err) {
+        setError(String(err));
+        return false;
+      }
+    },
+    [],
+  );
+
   const getSchemas = useCallback(async (): Promise<Record<string, string[]> | null> => {
     const conn = connRef.current;
     if (!conn || tables.length === 0) return null;
@@ -275,6 +325,7 @@ export function useDuckDB() {
     loadCSVFromText,
     executeQuery,
     executeStage,
+    dropTable,
     getSchemas,
   };
 }
