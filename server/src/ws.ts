@@ -12,6 +12,7 @@ export interface WsMessage {
     | "text"
     | "user_text"
     | "thinking"
+    | "interrupted"
     | "schema"
     | "tool_result";
   payload: unknown;

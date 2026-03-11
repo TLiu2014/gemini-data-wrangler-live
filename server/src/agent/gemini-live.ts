@@ -2,6 +2,7 @@ import { GoogleGenAI, Modality, type Session } from "@google/genai";
 import type { WebSocket } from "@fastify/websocket";
 import type { WsMessage } from "../ws.js";
 import { getToolDeclarations, handleToolCall } from "./tools.js";
+import { resolveApiKey } from "../apiKeyStore.js";
 
 // Google AI Studio (free tier) model ID for Gemini 2.5 Flash Multimodal Live API.
 // If this throws "model not found", check AI Studio docs for the latest month suffix.
@@ -24,15 +25,18 @@ You have tools to:
 IMPORTANT RULES:
 - When the user asks you to manipulate data, ACT IMMEDIATELY using your tools. Do NOT ask clarifying questions if the schema context gives you enough information.
 - For JOINs: inspect the schemas to find matching column names between tables (e.g. customer_id in both). Use standard SQL: CREATE OR REPLACE TABLE result_name AS SELECT ... FROM t1 JOIN t2 ON t1.key = t2.key. Pick sensible defaults (INNER JOIN, select all columns). Only call executeDataTransform — do NOT also call addReactFlowNode (the node is created automatically).
-- TOOL USAGE: When you call executeDataTransform with CREATE TABLE, the UI automatically creates a pipeline node (join, filter, etc.) based on the SQL. Do NOT call addReactFlowNode for the same transformation. Only use addReactFlowNode for non-SQL operations (e.g. manually adding an empty stage).
+- TOOL USAGE: When you call executeDataTransform with CREATE TABLE, the UI automatically creates a pipeline node (join, filter, select, etc.) based on the SQL. Do NOT call addReactFlowNode for the same transformation. NEVER use addReactFlowNode to create load/csv-import nodes — those are created automatically when the user uploads files. Only use addReactFlowNode for manually adding empty placeholder stages (rare).
+- OPERATION VALIDATION: Before executing a data operation, check if it makes sense for the data. For example, UNION requires tables with the same (or compatible) columns. If the user asks for an operation that doesn't fit (e.g. "union" when the tables have different schemas and should be joined), briefly explain why it won't work (one sentence), suggest the correct operation, and ask for confirmation before proceeding. Don't just blindly execute.
 - Write simple, straightforward SQL. Do NOT worry about data type serialization, casting, or BigInt issues — the runtime handles type conversions automatically. Never try to cast columns to work around serialization errors.
 - If a query returns an error, try a simpler version of the query instead of adding complex type casts.
 - When you use executeDataTransform, the SQL runs in DuckDB-WASM in the user's browser. You will receive the query results (row count, columns, sample rows, or errors) as a tool response so you can summarize them.
-- Be concise in your spoken responses — the user is watching the UI update in real time.
+- Be concise in your spoken responses — the user is watching the UI update in real time. Keep it natural and conversational, like a person.
 - Do not say "unknown" about the data. You always have the latest schema context.
 - RESULT TABLE NAMING: When creating tables with CREATE TABLE, use descriptive snake_case names that reflect the operation. For example: "customer_orders_join", "filtered_active_customers", "orders_by_region". NEVER overwrite or reuse source table names.
 - UNDO / REDO: When the user asks to undo, remove, or redo a transformation, use removeTransform with the table name. Always confirm with the user VERBALLY before calling removeTransform. For redo, remove the old result first, then re-execute the transform.
-- LANGUAGE: This app supports English only. If the user speaks in another language (e.g. Chinese/Mandarin), respond briefly in English saying "I only support English for now, please speak in English." and do not attempt to process the non-English request.`;
+- LANGUAGE: This app supports English only. If the user speaks in another language (e.g. Chinese/Mandarin), respond briefly in English saying "I only support English for now, please speak in English." and do not attempt to process the non-English request.
+- OFF-TOPIC QUESTIONS: If the user asks a general question not related to data wrangling or the current pipeline, answer very briefly (one short sentence) and gently steer back, e.g. "Good question — [short answer]. Now, anything you'd like me to do with the data?"
+- DATA UPLOAD: If the user mentions uploading or importing data, tell them to use the file upload area in the sidebar. Do NOT create load or csv-import nodes yourself — those appear automatically when files are uploaded.`;
 
 export class GeminiLiveSession {
   private session: Session | null = null;
@@ -41,7 +45,7 @@ export class GeminiLiveSession {
 
   constructor(clientSocket: WebSocket) {
     this.clientSocket = clientSocket;
-    const apiKey = process.env.GOOGLE_API_KEY;
+    const apiKey = resolveApiKey();
     if (!apiKey) throw new Error("GOOGLE_API_KEY not set");
     this.ai = new GoogleGenAI({ apiKey });
   }
@@ -80,6 +84,12 @@ export class GeminiLiveSession {
   }
 
   private handleGeminiMessage(msg: any): void {
+    // Model interrupted by user speech — stop playing the current response
+    if (msg.serverContent?.interrupted === true) {
+      this.sendToClient({ type: "interrupted", payload: {} });
+      return;
+    }
+
     // Audio response from the model
     const audioParts = msg.serverContent?.modelTurn?.parts?.filter(
       (p: any) => p.inlineData?.mimeType?.startsWith("audio/"),

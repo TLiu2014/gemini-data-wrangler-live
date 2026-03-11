@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 
 const OUTPUT_SAMPLE_RATE = 24000; // Gemini Live outputs 24kHz PCM
 
@@ -6,12 +6,14 @@ export function useAudioPlayback() {
   const ctxRef = useRef<AudioContext | null>(null);
   const nextStartRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  // Use a ref (not just state) so playChunk closure sees updates synchronously
+  const pausedRef = useRef(false);
+  const [paused, setPaused] = useState(false);
 
   const getContext = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
       ctxRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
       nextStartRef.current = 0;
-      // Create a persistent analyser for the output visualizer
       analyserRef.current = ctxRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
       analyserRef.current.smoothingTimeConstant = 0.9;
@@ -24,6 +26,10 @@ export function useAudioPlayback() {
 
   const playChunk = useCallback(
     (base64: string) => {
+      // While paused, drop new chunks. Already-scheduled audio stays queued in the
+      // suspended AudioContext and will resume from the right position when resumed.
+      if (pausedRef.current) return;
+
       const ctx = getContext();
 
       // Decode base64 → Int16 PCM → Float32
@@ -43,7 +49,6 @@ export function useAudioPlayback() {
 
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      // Route through analyser so visualizer can pick it up
       if (analyserRef.current) {
         source.connect(analyserRef.current);
       } else {
@@ -58,12 +63,48 @@ export function useAudioPlayback() {
     [getContext],
   );
 
+  // Fully stop and tear down (disconnect session)
   const stop = useCallback(() => {
     ctxRef.current?.close();
     ctxRef.current = null;
     analyserRef.current = null;
     nextStartRef.current = 0;
+    pausedRef.current = false;
+    setPaused(false);
   }, []);
 
-  return { playChunk, stop, analyser: analyserRef };
+  // Interrupt: clear all queued audio but keep session alive
+  const interrupt = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx || ctx.state === "closed") return;
+    ctx.close();
+    ctxRef.current = null;
+    analyserRef.current = null;
+    nextStartRef.current = 0;
+    pausedRef.current = false;
+    setPaused(false);
+  }, []);
+
+  // Pause: suspend AudioContext so already-queued audio freezes mid-playback
+  const pause = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx || ctx.state !== "running") return;
+    pausedRef.current = true;
+    setPaused(true);
+    void ctx.suspend();
+  }, []);
+
+  // Resume: unfreeze the AudioContext and re-enable incoming chunks
+  const resume = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx || ctx.state !== "suspended") return;
+    void ctx.resume().then(() => {
+      pausedRef.current = false;
+      // Reset nextStart so any future chunks queue from the current playback position
+      nextStartRef.current = 0;
+      setPaused(false);
+    });
+  }, []);
+
+  return { playChunk, stop, interrupt, pause, resume, paused, analyser: analyserRef };
 }

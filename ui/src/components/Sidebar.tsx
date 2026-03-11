@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import AudioVisualizer from "./AudioVisualizer.js";
 import FileUpload from "./FileUpload.js";
 import type { MicPermissionState } from "../hooks/useMicPermission.js";
@@ -44,6 +44,10 @@ interface SidebarProps {
   onFileUpload: (files: File[]) => void;
   onConnect: () => void;
   onDisconnect: () => void;
+  onInterrupt: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  audioPaused: boolean;
   autoConnect: boolean;
   status: string;
   geminiError: string | null;
@@ -65,6 +69,25 @@ function deriveAgentStatus(status: string, hasApiKey: boolean, geminiError: stri
   return { text: "Disconnected", level: "off" };
 }
 
+function exportChatLog(chatLog: ChatMessage[]) {
+  const lines = chatLog.map((msg) => {
+    const role = msg.role === "user" ? "You" : "Gemini";
+    let line = `**${role}:** ${msg.text}`;
+    if (msg.thinking?.trim()) {
+      line += `\n> _Thinking: ${msg.thinking.trim()}_`;
+    }
+    return line;
+  });
+  const content = `# Chat Export\n\n${lines.join("\n\n")}`;
+  const blob = new Blob([content], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chat-export-${new Date().toISOString().slice(0, 16).replace(":", "-")}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Sidebar({
   micActive,
   micPermission,
@@ -72,6 +95,10 @@ export default function Sidebar({
   onFileUpload,
   onConnect,
   onDisconnect,
+  onInterrupt,
+  onPause,
+  onResume,
+  audioPaused,
   autoConnect,
   status,
   geminiError,
@@ -86,11 +113,14 @@ export default function Sidebar({
 }: SidebarProps) {
   const agentInfo = deriveAgentStatus(status, hasApiKey, geminiError);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const isConnected = status === "connected";
 
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatLog]);
+
+  const handleExport = useCallback(() => exportChatLog(chatLog), [chatLog]);
 
   return (
     <>
@@ -114,26 +144,6 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Connect / Disconnect (manual mode only) */}
-      {!autoConnect && (
-        <div className="sidebar-section connect-section">
-          {status === "connected" ? (
-            <button className="gemini-disconnect-btn" onClick={onDisconnect}>
-              Disconnect
-            </button>
-          ) : (
-            <button
-              className="gemini-connect-btn"
-              onClick={onConnect}
-              disabled={status === "connecting" || !hasApiKey}
-              title={!hasApiKey ? "Set your API key in Settings first" : undefined}
-            >
-              {status === "connecting" ? "Connecting..." : "Connect to Gemini"}
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Agent status */}
       <div className="status-indicator">
         <span className={`status-dot ${agentInfo.level === "ok" ? "on" : agentInfo.level === "warn" ? "warn" : agentInfo.level === "error" ? "error" : ""}`} />
@@ -153,15 +163,66 @@ export default function Sidebar({
           />
         </div>
         <div className="visualizer-item">
-          <span className="visualizer-label">Gemini {status === "connected" && <span className="voice-live gemini">Active</span>}</span>
+          <span className="visualizer-label">Gemini {isConnected && <span className="voice-live gemini">Active</span>}</span>
           <AudioVisualizer
             analyser={geminiAnalyser.current}
             color={[156, 39, 176]}
             colorEnd={[66, 133, 244]}
             label=""
-            active={status === "connected"}
+            active={isConnected}
           />
         </div>
+      </div>
+
+      {/* Control bar — all buttons in one row */}
+      <div className="control-bar">
+        {/* Connect / Disconnect */}
+        {!autoConnect && (
+          isConnected ? (
+            <button className="ctrl-btn disconnect" onClick={onDisconnect} title="Disconnect">
+              Disconnect
+            </button>
+          ) : (
+            <button
+              className="ctrl-btn connect"
+              onClick={onConnect}
+              disabled={status === "connecting" || !hasApiKey}
+              title={!hasApiKey ? "Set your API key in Settings first" : "Connect to Gemini"}
+            >
+              {status === "connecting" ? "Connecting..." : "Connect"}
+            </button>
+          )
+        )}
+
+        {/* Mute / Unmute */}
+        <button
+          className={`ctrl-btn ${micActive ? "mic-on" : "mic-off"}`}
+          onClick={onToggleMic}
+          disabled={micPermission === "denied"}
+          title={micPermission === "denied" ? "Mic blocked" : micActive ? "Mute" : "Unmute"}
+        >
+          {micPermission === "denied" ? "Blocked" : micActive ? "Mute" : "Unmute"}
+        </button>
+
+        {/* Interrupt */}
+        <button
+          className="ctrl-btn interrupt"
+          onClick={onInterrupt}
+          disabled={!isConnected}
+          title="Interrupt Gemini"
+        >
+          Stop
+        </button>
+
+        {/* Pause / Resume */}
+        <button
+          className={`ctrl-btn ${audioPaused ? "resume" : "pause"}`}
+          onClick={audioPaused ? onResume : onPause}
+          disabled={!isConnected}
+          title={audioPaused ? "Resume playback" : "Pause playback"}
+        >
+          {audioPaused ? "Resume" : "Pause"}
+        </button>
       </div>
 
       {/* Unified chat log */}
@@ -177,18 +238,12 @@ export default function Sidebar({
         <div ref={chatEndRef} />
       </div>
 
-      {/* Mic toggle */}
-      <button
-        className={`mic-btn ${micActive ? "on" : "off"}`}
-        onClick={onToggleMic}
-        disabled={micPermission === "denied"}
-      >
-        {micPermission === "denied"
-          ? "Mic Blocked"
-          : micActive
-            ? "Mute"
-            : "Unmute"}
-      </button>
+      {/* Export chat */}
+      {chatLog.length > 0 && (
+        <button className="ctrl-btn export" onClick={handleExport} title="Export chat as markdown">
+          Export Chat
+        </button>
+      )}
     </>
   );
 }

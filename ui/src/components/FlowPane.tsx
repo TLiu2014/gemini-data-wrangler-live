@@ -709,13 +709,34 @@ function FlowPaneInner(
       }
 
       if (sourceNodes.length > 0) {
-        const newEdges = sourceNodes.map((src) =>
-          buildEdge(`edge-${src.id}-${nodeId}-${Date.now()}`, src.id, nodeId, currentNodes),
-        );
-        setEdges((prevEdges) => [...prevEdges, ...newEdges]);
+        // Reposition before adding edges: if the primary source already has downstream
+        // children, place the new node to the right instead of directly below (avoids overlap)
+        setEdges((prevEdges) => {
+          if (sourceNodes.length === 1) {
+            const src = sourceNodes[0];
+            const alreadyHasChild = prevEdges.some(
+              (e) => e.source === src.id && e.target !== nodeId,
+            );
+            if (alreadyHasChild) {
+              // Find the rightmost X of all existing nodes, then add a column gap
+              const maxX = Math.max(...currentNodes.map((n) => n.position.x));
+              const newX = maxX + 220;
+              const newY = src.position.y + 140;
+              setNodes((prev) =>
+                prev.map((n) =>
+                  n.id === nodeId ? { ...n, position: { x: newX, y: newY } } : n,
+                ),
+              );
+            }
+          }
+          const newEdges = sourceNodes.map((src) =>
+            buildEdge(`edge-${src.id}-${nodeId}-${Date.now()}`, src.id, nodeId, currentNodes),
+          );
+          return [...prevEdges, ...newEdges];
+        });
       }
     },
-    [setEdges],
+    [setEdges, setNodes],
   );
 
   const removeNodeByTableName = useCallback(

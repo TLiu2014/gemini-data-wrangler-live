@@ -38,6 +38,14 @@ export default function App() {
   const handleApiKeyChange = useCallback((key: string) => {
     setApiKey(key);
     sessionStorage.setItem("gemini_api_key", key);
+    // Persist to server (encrypted on disk)
+    if (key.trim()) {
+      fetch("/api/settings/api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key.trim() }),
+      }).catch(() => {});
+    }
   }, []);
 
   // Check if the server already has an API key configured (e.g. via .env)
@@ -162,7 +170,7 @@ export default function App() {
   } | null>(null);
 
   // Audio playback
-  const { playChunk, stop: stopPlayback, analyser: geminiAnalyser } = useAudioPlayback();
+  const { playChunk, stop: stopPlayback, interrupt: interruptPlayback, pause: pausePlayback, resume: resumePlayback, paused: audioPaused, analyser: geminiAnalyser } = useAudioPlayback();
 
   // WebSocket
   const { status, geminiError, connect, disconnect, send } = useWebSocket({
@@ -255,7 +263,7 @@ export default function App() {
             : /\bWHERE\b/i.test(sqlNorm) ? "filter"
             : /\bGROUP\s+BY\b/i.test(sqlNorm) ? "group"
             : /\bORDER\s+BY\b/i.test(sqlNorm) ? "sort"
-            : "custom";
+            : "select";
           // addNode returns null if a node with this tableName already exists (dedup)
           const nodeId = flowRef.current?.addNode(
             stageType,
@@ -338,6 +346,18 @@ export default function App() {
           return [...prev.slice(0, -1), { ...last, thinking: (last.thinking ?? "") + payload.text }];
         }
         return [...prev, { role: "gemini", text: "", thinking: payload.text, ts: Date.now() }];
+      });
+    },
+    onInterrupted: () => {
+      // Gemini detected user speech — clear queued audio and mark transcript as cut off
+      interruptPlayback();
+      setChatLog((prev) => {
+        if (prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        if (last.role !== "gemini") return prev;
+        // Only append "..." if the message doesn't already end with it
+        if (last.text.trimEnd().endsWith("...")) return prev;
+        return [...prev.slice(0, -1), { ...last, text: last.text.trimEnd() + "..." }];
       });
     },
     onRequestSchemas: async () => {
@@ -454,6 +474,11 @@ export default function App() {
     stopPlayback();
     disconnect();
   }, [disconnect, micActive, stopMic, stopCapture, stopPlayback]);
+
+  // Interrupt Gemini's current audio response
+  const handleInterrupt = useCallback(() => {
+    interruptPlayback();
+  }, [interruptPlayback]);
 
   // Stop mic when Gemini disconnects (error, timeout, etc.)
   const prevStatusRef = useRef(status);
@@ -693,6 +718,10 @@ export default function App() {
             onFileUpload={handleFileUpload}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
+            onInterrupt={handleInterrupt}
+            onPause={pausePlayback}
+            onResume={resumePlayback}
+            audioPaused={audioPaused}
             autoConnect={autoConnect}
             status={status}
             geminiError={geminiError}

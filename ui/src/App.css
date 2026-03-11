@@ -915,6 +915,106 @@ table.data-table th {
   padding: 8px 0;
 }
 
+/* --- Control bar (all action buttons in one place) --- */
+.control-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.ctrl-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ctrl-btn.connect {
+  background: linear-gradient(135deg, #4285f4, #9c27b0);
+  color: white;
+  border: none;
+}
+
+.ctrl-btn.connect:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.ctrl-btn.disconnect {
+  background: #fff0f0;
+  color: #c5221f;
+}
+
+.ctrl-btn.disconnect:hover {
+  background: #fce8e6;
+}
+
+.ctrl-btn.mic-on {
+  background: #34a853;
+  color: white;
+  border-color: #34a853;
+}
+
+.ctrl-btn.mic-off {
+  background: #e8eaed;
+  color: #5f6368;
+}
+
+.ctrl-btn.mic-off:hover:not(:disabled) {
+  background: #dadce0;
+}
+
+.ctrl-btn.interrupt {
+  background: #fef7e0;
+  color: #e37400;
+  border-color: #fdd835;
+}
+
+.ctrl-btn.interrupt:hover:not(:disabled) {
+  background: #fef1c7;
+}
+
+.ctrl-btn.pause {
+  background: #e8f0fe;
+  color: #4285f4;
+}
+
+.ctrl-btn.pause:hover:not(:disabled) {
+  background: #d2e3fc;
+}
+
+.ctrl-btn.resume {
+  background: #e6f4ea;
+  color: #1e8e3e;
+}
+
+.ctrl-btn.resume:hover:not(:disabled) {
+  background: #ceead6;
+}
+
+.ctrl-btn.export {
+  flex: none;
+  width: 100%;
+  background: #f8f9fa;
+  color: #5f6368;
+}
+
+.ctrl-btn.export:hover {
+  background: #e8eaed;
+}
+
 /* --- Add Stage button + menu --- */
 .add-stage-btn {
   padding: 8px 16px;
