@@ -48,6 +48,7 @@ interface SidebarProps {
   onPause: () => void;
   onResume: () => void;
   audioPaused: boolean;
+  geminiSpeaking: boolean;
   autoConnect: boolean;
   status: string;
   geminiError: string | null;
@@ -99,6 +100,7 @@ export default function Sidebar({
   onPause,
   onResume,
   audioPaused,
+  geminiSpeaking,
   autoConnect,
   status,
   geminiError,
@@ -174,9 +176,8 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Control bar — all buttons in one row */}
+      {/* Control bar — row 1: connection + mic */}
       <div className="control-bar">
-        {/* Connect / Disconnect */}
         {!autoConnect && (
           isConnected ? (
             <button className="ctrl-btn disconnect" onClick={onDisconnect} title="Disconnect">
@@ -193,35 +194,53 @@ export default function Sidebar({
             </button>
           )
         )}
-
-        {/* Mute / Unmute */}
         <button
           className={`ctrl-btn ${micActive ? "mic-on" : "mic-off"}`}
           onClick={onToggleMic}
           disabled={micPermission === "denied"}
-          title={micPermission === "denied" ? "Mic blocked" : micActive ? "Mute" : "Unmute"}
+          title={micPermission === "denied" ? "Mic blocked" : micActive ? "Mute mic" : "Unmute mic"}
         >
-          {micPermission === "denied" ? "Blocked" : micActive ? "Mute" : "Unmute"}
+          {micPermission === "denied" ? "Mic Blocked" : micActive ? "Mute" : "Unmute"}
         </button>
+      </div>
 
-        {/* Interrupt */}
+      {/* Control bar — row 2: playback controls + export */}
+      <div className="control-bar">
         <button
           className="ctrl-btn interrupt"
           onClick={onInterrupt}
-          disabled={!isConnected}
-          title="Interrupt Gemini"
+          disabled={!geminiSpeaking}
+          title={geminiSpeaking ? "Cut off Gemini and take your turn" : "Available when Gemini is talking"}
         >
-          Stop
+          <span className="ctrl-btn-label">Interrupt</span>
+          <span className="ctrl-btn-hint">then speak</span>
         </button>
-
-        {/* Pause / Resume */}
         <button
           className={`ctrl-btn ${audioPaused ? "resume" : "pause"}`}
           onClick={audioPaused ? onResume : onPause}
-          disabled={!isConnected}
-          title={audioPaused ? "Resume playback" : "Pause playback"}
+          disabled={audioPaused ? false : !geminiSpeaking}
+          title={audioPaused ? "Resume — continue listening" : geminiSpeaking ? "Pause — hold without interrupting" : "Available when Gemini is talking"}
         >
-          {audioPaused ? "Resume" : "Pause"}
+          {audioPaused ? (
+            <>
+              <span className="ctrl-btn-label">Resume</span>
+              <span className="ctrl-btn-hint">keep listening</span>
+            </>
+          ) : (
+            <>
+              <span className="ctrl-btn-label">Pause</span>
+              <span className="ctrl-btn-hint">hold on</span>
+            </>
+          )}
+        </button>
+        <button
+          className="ctrl-btn export"
+          onClick={handleExport}
+          disabled={chatLog.length === 0}
+          title="Export chat as markdown"
+        >
+          <span className="ctrl-btn-label">Export</span>
+          <span className="ctrl-btn-hint">save chat</span>
         </button>
       </div>
 
@@ -237,13 +256,6 @@ export default function Sidebar({
         ))}
         <div ref={chatEndRef} />
       </div>
-
-      {/* Export chat */}
-      {chatLog.length > 0 && (
-        <button className="ctrl-btn export" onClick={handleExport} title="Export chat as markdown">
-          Export Chat
-        </button>
-      )}
     </>
   );
 }

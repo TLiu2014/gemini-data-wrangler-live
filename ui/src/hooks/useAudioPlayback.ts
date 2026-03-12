@@ -9,6 +9,8 @@ export function useAudioPlayback() {
   // Use a ref (not just state) so playChunk closure sees updates synchronously
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
+  const playingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const getContext = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
@@ -59,22 +61,31 @@ export function useAudioPlayback() {
       const startAt = Math.max(now, nextStartRef.current);
       source.start(startAt);
       nextStartRef.current = startAt + buffer.duration;
+
+      // Track playing state — auto-clear ~300ms after last scheduled chunk finishes
+      setIsPlaying(true);
+      if (playingTimeoutRef.current) clearTimeout(playingTimeoutRef.current);
+      const msRemaining = (nextStartRef.current - ctx.currentTime) * 1000 + 300;
+      playingTimeoutRef.current = setTimeout(() => setIsPlaying(false), msRemaining);
     },
     [getContext],
   );
 
   // Fully stop and tear down (disconnect session)
   const stop = useCallback(() => {
+    if (playingTimeoutRef.current) { clearTimeout(playingTimeoutRef.current); playingTimeoutRef.current = null; }
     ctxRef.current?.close();
     ctxRef.current = null;
     analyserRef.current = null;
     nextStartRef.current = 0;
     pausedRef.current = false;
     setPaused(false);
+    setIsPlaying(false);
   }, []);
 
   // Interrupt: clear all queued audio but keep session alive
   const interrupt = useCallback(() => {
+    if (playingTimeoutRef.current) { clearTimeout(playingTimeoutRef.current); playingTimeoutRef.current = null; }
     const ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") return;
     ctx.close();
@@ -83,6 +94,7 @@ export function useAudioPlayback() {
     nextStartRef.current = 0;
     pausedRef.current = false;
     setPaused(false);
+    setIsPlaying(false);
   }, []);
 
   // Pause: suspend AudioContext so already-queued audio freezes mid-playback
@@ -106,5 +118,5 @@ export function useAudioPlayback() {
     });
   }, []);
 
-  return { playChunk, stop, interrupt, pause, resume, paused, analyser: analyserRef };
+  return { playChunk, stop, interrupt, pause, resume, paused, isPlaying, analyser: analyserRef };
 }

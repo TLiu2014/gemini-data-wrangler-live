@@ -170,7 +170,7 @@ export default function App() {
   } | null>(null);
 
   // Audio playback
-  const { playChunk, stop: stopPlayback, interrupt: interruptPlayback, pause: pausePlayback, resume: resumePlayback, paused: audioPaused, analyser: geminiAnalyser } = useAudioPlayback();
+  const { playChunk, stop: stopPlayback, interrupt: interruptPlayback, pause: pausePlayback, resume: resumePlayback, paused: audioPaused, isPlaying: geminiSpeaking, analyser: geminiAnalyser } = useAudioPlayback();
 
   // WebSocket
   const { status, geminiError, connect, disconnect, send } = useWebSocket({
@@ -722,6 +722,7 @@ export default function App() {
             onPause={pausePlayback}
             onResume={resumePlayback}
             audioPaused={audioPaused}
+            geminiSpeaking={geminiSpeaking}
             autoConnect={autoConnect}
             status={status}
             geminiError={geminiError}
