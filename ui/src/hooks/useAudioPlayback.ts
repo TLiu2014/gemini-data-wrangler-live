@@ -76,6 +76,7 @@ export function useAudioPlayback() {
   // Fully stop and tear down (disconnect session)
   const stop = useCallback(() => {
     if (playingTimeoutRef.current) { clearTimeout(playingTimeoutRef.current); playingTimeoutRef.current = null; }
+    suppressUntilRef.current = 0;
     ctxRef.current?.close();
     ctxRef.current = null;
     analyserRef.current = null;
@@ -85,11 +86,11 @@ export function useAudioPlayback() {
     setIsPlaying(false);
   }, []);
 
-  // Interrupt: clear all queued audio but keep session alive.
-  // Suppress new chunks for 1s so the user has time to speak.
+  // Interrupt: clear all queued audio and suppress ALL future chunks until
+  // allowPlayback() is called (i.e. until the server confirms Gemini stopped).
   const interrupt = useCallback(() => {
     if (playingTimeoutRef.current) { clearTimeout(playingTimeoutRef.current); playingTimeoutRef.current = null; }
-    suppressUntilRef.current = Date.now() + 1000;
+    suppressUntilRef.current = Infinity;
     const ctx = ctxRef.current;
     if (!ctx || ctx.state === "closed") {
       setIsPlaying(false);
@@ -102,6 +103,11 @@ export function useAudioPlayback() {
     pausedRef.current = false;
     setPaused(false);
     setIsPlaying(false);
+  }, []);
+
+  // Allow playback again after suppression (called when server confirms model stopped).
+  const allowPlayback = useCallback(() => {
+    suppressUntilRef.current = 0;
   }, []);
 
   // Pause: suspend AudioContext so already-queued audio freezes mid-playback
@@ -125,5 +131,5 @@ export function useAudioPlayback() {
     });
   }, []);
 
-  return { playChunk, stop, interrupt, pause, resume, paused, isPlaying, analyser: analyserRef };
+  return { playChunk, stop, interrupt, allowPlayback, pause, resume, paused, isPlaying, analyser: analyserRef };
 }

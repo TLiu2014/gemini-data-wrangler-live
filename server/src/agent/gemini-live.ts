@@ -333,6 +333,12 @@ export class GeminiLiveSession {
       ? `Planned work:\n- ${plannedActions.join("\n- ")}`
       : "Planned work: nothing to execute.";
 
+    // Build a prescriptive stage-status sentence to inject directly into Rule 1
+    // so Gemini doesn't have to reason about state — it just says what we tell it.
+    const stageStatusSentence = incompleteStageTypes.length === 0
+      ? "All pipeline stages are already complete — tell the user that."
+      : `You are about to complete ${incompleteStageTypes.length} stage${incompleteStageTypes.length > 1 ? "s" : ""}: ${incompleteStageTypes.join(", ")}. In your greeting say something like "I'm going to complete the ${incompleteStageTypes.join(" and ")} stage${incompleteStageTypes.length > 1 ? "s" : ""} now."`;
+
     // Compact JSON (no pretty-printing) to stay within Gemini Live per-turn limits
     const stateJson = JSON.stringify(graphState);
 
@@ -348,7 +354,7 @@ ${stateJson}
 You are in EXECUTE mode. Act proactively — execute the incomplete stages without waiting for the user to tell you what to do. You may ask clarifying questions if genuinely needed.
 
 Your task:
-1. Start with ONE single greeting (do NOT split into multiple responses). In that greeting: name the loaded tables (${loadedTableNames.join(", ") || "none"}), list the incomplete stages (${incompleteStageTypes.join(", ") || "none"}), and say exactly what the status is at the moment you first speak. If work is still in progress, use explicit wording like "I'm doing the join stage now" or "I'm completing the filter stage now." If the work has already finished by the time you first speak, say that explicitly, for example "The join stage is done." Keep it to 2-3 sentences. Do NOT say "hello" or greet separately before this.
+1. Start with ONE single greeting (do NOT split into multiple responses). In that greeting: name the loaded tables (${loadedTableNames.join(", ") || "none"}). Then: ${stageStatusSentence} Keep it to 2-3 sentences. Do NOT say "hello" or greet separately before this.
 2. Then process ONE incomplete node at a time (executionState "running" and tableName null). Before each, briefly say what you're doing (e.g. "Adding the join now."), then call executeDataTransform with the SQL. Wait for the result before moving to the next.
 3. After EACH tool result comes back, briefly narrate the outcome (e.g. "The join produced 10 rows. Now applying the filter.").
 4. Use each node's stageConfig.resultName as the CREATE TABLE name. If stageConfig is null or has no resultName, generate a descriptive snake_case name based on the stage type and connected tables (e.g. "customers_orders_join").

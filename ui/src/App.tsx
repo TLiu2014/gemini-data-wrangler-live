@@ -258,7 +258,7 @@ export default function App() {
   } | null>(null);
 
   // Audio playback
-  const { playChunk, stop: stopPlayback, interrupt: interruptPlayback, pause: pausePlayback, resume: resumePlayback, paused: audioPaused, isPlaying: geminiSpeaking, analyser: geminiAnalyser } = useAudioPlayback();
+  const { playChunk, stop: stopPlayback, interrupt: interruptPlayback, allowPlayback, pause: pausePlayback, resume: resumePlayback, paused: audioPaused, isPlaying: geminiSpeaking, analyser: geminiAnalyser } = useAudioPlayback();
 
   // Canvas execution pending flag (declared early so useWebSocket callbacks can access it)
   const pendingCanvasRef = useRef(false);
@@ -279,6 +279,7 @@ export default function App() {
   const canvasPlaceholderBaseRef = useRef("");
   const audioPausedRef = useRef(false);
   const pausedTextBufferRef = useRef<string[]>([]);
+  const suppressTextRef = useRef(false);
 
   const clearCanvasReleaseTimer = useCallback(() => {
     if (canvasReleaseTimerRef.current) {
@@ -543,7 +544,8 @@ export default function App() {
       const displayText = getDisplayableEnglishTranscript(payload.text);
       if (!displayText) return;
 
-      // Buffer transcript while audio is paused
+      // Drop text while interrupted or audio is paused
+      if (suppressTextRef.current) return;
       if (audioPausedRef.current) {
         pausedTextBufferRef.current.push(displayText);
         return;
@@ -596,8 +598,10 @@ export default function App() {
       });
     },
     onInterrupted: () => {
-      // Gemini detected user speech — clear queued audio and mark transcript as cut off
+      // Gemini detected user speech — stop audio, re-enable text + audio for next response
       interruptPlayback();
+      allowPlayback();
+      suppressTextRef.current = false;
       setChatLog((prev) => {
         if (prev.length === 0) return prev;
         const last = prev[prev.length - 1];
@@ -753,6 +757,7 @@ export default function App() {
   const handleInterrupt = useCallback(() => {
     audioPausedRef.current = false;
     pausedTextBufferRef.current = [];
+    suppressTextRef.current = true;
     interruptPlayback();
   }, [interruptPlayback]);
 
