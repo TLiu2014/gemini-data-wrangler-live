@@ -210,7 +210,10 @@ export class GeminiLiveSession {
   }
 
   sendAudio(base64Audio: string): void {
-    this.session?.sendRealtimeInput({
+    // Route to execute session while it's active so follow-up voice during execute
+    // mode uses the same 09-2025 model (avoids mid-conversation model switch)
+    const target = this.executeSession ?? this.session;
+    target?.sendRealtimeInput({
       media: { mimeType: "audio/pcm;rate=16000", data: base64Audio },
     });
   }
@@ -219,7 +222,8 @@ export class GeminiLiveSession {
     if (this.isAuxiliaryClientContentGuarded()) {
       return;
     }
-    this.session?.sendRealtimeInput({
+    const target = this.executeSession ?? this.session;
+    target?.sendRealtimeInput({
       media: { mimeType: "image/jpeg", data: base64Image },
     });
   }
@@ -235,8 +239,9 @@ export class GeminiLiveSession {
     );
     const text = `[DATA CONTEXT] The user has loaded the following tables:\n${lines.join("\n")}\nIMPORTANT: Use ONLY the exact column names listed above in your SQL. Do NOT invent columns that are not listed.`;
     console.log("Sending schema context to Gemini:", text);
+    const target = this.executeSession ?? this.session;
     try {
-      (this.session as any)?.sendClientContent?.({
+      (target as any)?.sendClientContent?.({
         turns: [{ role: "user", parts: [{ text }] }],
         turnComplete: true,
       });
@@ -373,6 +378,7 @@ Your task:
           speechConfig: { languageCode: "en-US" },
           systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
           tools: [{ functionDeclarations: getToolDeclarations() }],
+          inputAudioTranscription: {},
           outputAudioTranscription: {},
         } as any,
         callbacks: {
@@ -427,9 +433,8 @@ Now respond to the user with a brief spoken update in English.
     } catch (err) {
       console.warn("Failed to send canvas completion prompt:", err);
     }
-
-    // Schedule execute session cleanup — give Gemini time to respond with audio
-    this.scheduleExecuteCleanup();
+    // No cleanup here — execute session stays alive so follow-up voice conversation
+    // continues on the 09-2025 model. Session closes on new execute request or disconnect.
   }
 
   sendConnectIntro(tables?: string[], graphState?: unknown): void {
@@ -495,10 +500,25 @@ ${graphText}`;
       console.log("Closing execute session");
       this.executeSession.close();
       this.executeSession = null;
-      this.executePlannedActions = [];
 
       // Clear the guard — execute session is done, chat session is safe for context updates
       this.auxiliaryClientContentGuardUntil = 0;
+
+      // Inform chat session of what was just completed so it never calls those stages incomplete
+      if (this.executePlannedActions.length > 0 && this.session) {
+        const completedList = this.executePlannedActions.join("; ");
+        const updateMsg = `[PIPELINE UPDATE — do not respond] The canvas execute operation just finished. All previously incomplete stages are now done: ${completedList}. Treat the pipeline as fully complete unless the user adds new stages.`;
+        try {
+          (this.session as any)?.sendClientContent?.({
+            turns: [{ role: "user", parts: [{ text: updateMsg }] }],
+            turnComplete: false,
+          });
+        } catch (err) {
+          console.warn("Failed to send pipeline update to chat session:", err);
+        }
+      }
+
+      this.executePlannedActions = [];
 
       // Refresh chat session with updated schemas (new tables from execution)
       this.sendToClient({ type: "status", payload: { requestSchemas: true } });
