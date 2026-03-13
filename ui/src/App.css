@@ -880,6 +880,16 @@ table.data-table th {
   white-space: pre-wrap;
 }
 
+.chat-text-pending {
+  opacity: 0.5;
+  animation: pending-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+
 .thinking-toggle {
   background: none;
   border: none;
@@ -1343,4 +1353,79 @@ table.data-table th {
 .stage-node-card button[title="Collapse"]:hover,
 .stage-node-card button[title="Expand"]:hover {
   color: #202124;
+}
+
+/* --- Node execution state badges --- */
+.node-exec-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-top: 3px;
+  width: fit-content;
+}
+
+.node-exec-badge.pending {
+  background: #fef7e0;
+  color: #e37400;
+}
+
+.node-exec-badge.running {
+  background: #e8f0fe;
+  color: #1967d2;
+  animation: badge-pulse 1.2s ease-in-out infinite;
+}
+
+.node-exec-badge.success {
+  background: #e6f4ea;
+  color: #1e8e3e;
+}
+
+.node-exec-badge.error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* --- Execute Canvas button --- */
+.execute-canvas-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #4285f4, #9c27b0);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 6px rgba(66, 133, 244, 0.35);
+  white-space: nowrap;
+}
+
+.execute-canvas-btn:hover {
+  opacity: 0.9;
+  box-shadow: 0 3px 10px rgba(66, 133, 244, 0.45);
+}
+
+/* --- Stage config save button --- */
+.stage-config-save {
+  padding: 8px 16px;
+  background: #e8f0fe;
+  color: #1967d2;
+  border: 1px solid #4285f4;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.stage-config-save:hover {
+  background: #d2e3fc;
 }

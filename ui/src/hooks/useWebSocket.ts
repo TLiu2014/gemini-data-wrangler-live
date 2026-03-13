@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from "react";
 
 export interface WsMessage {
-  type: "audio" | "screenshot" | "action" | "sql" | "status" | "text" | "user_text" | "thinking" | "interrupted" | "schema" | "tool_result";
+  type: "audio" | "screenshot" | "action" | "sql" | "status" | "text" | "user_text" | "thinking" | "interrupted" | "schema" | "tool_result" | "canvas_execute" | "canvas_complete" | "connect_intro";
   payload: unknown;
 }
 

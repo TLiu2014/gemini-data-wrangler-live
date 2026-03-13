@@ -1,12 +1,14 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { TableInfo } from "../hooks/useDuckDB.js";
-import { generateStageSQL, type StageConfig } from "../utils/sqlGenerator.js";
+import { type StageConfig } from "../utils/sqlGenerator.js";
+
+const STAGE_TYPES = ["FILTER", "JOIN", "UNION", "GROUP", "SELECT", "SORT", "CUSTOM"];
 
 interface StageConfigDialogProps {
   stageType: string;
   nodeId: string;
   tables: TableInfo[];
-  onRun: (sql: string, resultName: string, stageConfig?: StageConfig) => void;
+  onSave?: (stageConfig: StageConfig) => void;
   onClose: () => void;
 }
 
@@ -14,14 +16,23 @@ export default function StageConfigDialog({
   stageType,
   nodeId,
   tables,
-  onRun,
+  onSave,
   onClose,
 }: StageConfigDialogProps) {
-  const type = stageType.toUpperCase();
-  const defaultResultName = `stage_${type.toLowerCase()}_${nodeId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const [selectedType, setSelectedType] = useState(stageType.toUpperCase());
+  const type = selectedType;
+  const makeDefaultResultName = (t: string) => `stage_${t.toLowerCase()}_${nodeId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const defaultResultName = makeDefaultResultName(type);
 
   const [resultName, setResultName] = useState(defaultResultName);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset result name and clear error when type changes
+  useEffect(() => {
+    setResultName(makeDefaultResultName(selectedType));
+    setError(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedType]);
 
   // FILTER
   const [filterTable, setFilterTable] = useState("");
@@ -70,53 +81,30 @@ export default function StageConfigDialog({
     return map;
   }, [tables]);
 
-  const handleRun = () => {
-    setError(null);
-    try {
-      let config: StageConfig;
-      switch (type) {
-        case "FILTER":
-          config = {
-            type,
-            resultName,
-            table: filterTable,
-            column: filterColumn,
-            operator: filterOperator,
-            value: filterValue,
-          };
-          break;
-        case "JOIN":
-          config = { type, resultName, leftTable, rightTable, leftKey, rightKey, joinType };
-          break;
-        case "UNION":
-          config = { type, resultName, unionTables, unionType };
-          break;
-        case "GROUP":
-          config = {
-            type,
-            resultName,
-            groupTable,
-            groupByColumns,
-            aggregations,
-          };
-          break;
-        case "SELECT":
-          config = { type, resultName, selectTable, selectColumns };
-          break;
-        case "SORT":
-          config = { type, resultName, sortTable, sortColumn, sortDirection };
-          break;
-        case "CUSTOM":
-          config = { type, resultName, sql: customSql };
-          break;
-        default:
-          throw new Error(`Unknown stage type: ${type}`);
-      }
-      const sql = generateStageSQL(config);
-      onRun(sql, resultName, config);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+  const buildConfig = (): StageConfig => {
+    switch (type) {
+      case "FILTER":
+        return { type, resultName, table: filterTable, column: filterColumn, operator: filterOperator, value: filterValue };
+      case "JOIN":
+        return { type, resultName, leftTable, rightTable, leftKey, rightKey, joinType };
+      case "UNION":
+        return { type, resultName, unionTables, unionType };
+      case "GROUP":
+        return { type, resultName, groupTable, groupByColumns, aggregations };
+      case "SELECT":
+        return { type, resultName, selectTable, selectColumns };
+      case "SORT":
+        return { type, resultName, sortTable, sortColumn, sortDirection };
+      case "CUSTOM":
+        return { type, resultName, sql: customSql };
+      default:
+        return { type, resultName };
     }
+  };
+
+  const handleSave = () => {
+    setError(null);
+    onSave?.(buildConfig());
   };
 
   const renderFields = () => {
@@ -371,11 +359,18 @@ export default function StageConfigDialog({
     <div className="stage-config-overlay" onClick={onClose}>
       <div className="stage-config-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="stage-config-header">
-          <h3>Configure {type} Stage</h3>
+          <h3>Configure Stage</h3>
           <button className="stage-config-close" onClick={onClose}>&times;</button>
         </div>
 
         <div className="stage-config-body">
+          <Field label="Stage type">
+            <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}>
+              {STAGE_TYPES.map((t) => (
+                <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Result table name">
             <input value={resultName} onChange={(e) => setResultName(e.target.value)} />
           </Field>
@@ -387,7 +382,9 @@ export default function StageConfigDialog({
 
         <div className="stage-config-footer">
           <button className="stage-config-cancel" onClick={onClose}>Cancel</button>
-          <button className="stage-config-run" onClick={handleRun}>Run</button>
+          {onSave && (
+            <button className="stage-config-save" onClick={handleSave}>Save</button>
+          )}
         </div>
       </div>
     </div>

@@ -14,7 +14,10 @@ export interface WsMessage {
     | "thinking"
     | "interrupted"
     | "schema"
-    | "tool_result";
+    | "tool_result"
+    | "canvas_execute"
+    | "canvas_complete"
+    | "connect_intro";
   payload: unknown;
 }
 
@@ -68,6 +71,26 @@ export function registerWebSocketRoutes(app: FastifyInstance) {
                 result: Record<string, unknown>;
               };
               gemini?.sendToolResult(payload.toolCallId, payload.toolName, payload.result);
+              break;
+            }
+
+            case "canvas_execute": {
+              const payload = msg.payload as { graphState: unknown; schemas?: Record<string, string[]> };
+              await gemini?.sendCanvasExecutionRequest(payload.graphState, payload.schemas);
+              break;
+            }
+
+            case "canvas_complete": {
+              gemini?.sendCanvasCompletionPrompt();
+              break;
+            }
+
+            case "connect_intro": {
+              const payload = msg.payload as {
+                tables?: string[];
+                graphState?: unknown;
+              };
+              gemini?.sendConnectIntro(payload.tables, payload.graphState);
               break;
             }
 

@@ -8,6 +8,7 @@ interface ChatMessage {
   text: string;
   thinking?: string;
   ts: number;
+  placeholder?: boolean;
 }
 
 function ChatBubble({ msg }: { msg: ChatMessage }) {
@@ -15,13 +16,16 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
   const hasThinking = !!msg.thinking?.trim();
   const hasText = !!msg.text.trim();
 
-  // Don't render empty bubbles
-  if (!hasText && !hasThinking) return null;
+  // Render only visible text bubbles; keep placeholders visible while Gemini warms up.
+  if (!hasText && !msg.placeholder) return null;
 
   return (
     <div className={`chat-bubble ${msg.role}`}>
       <span className="chat-role">{msg.role === "user" ? "You" : "Gemini"}</span>
-      {hasText && <span className="chat-text">{msg.text}</span>}
+      {hasText
+        ? <span className={`chat-text${msg.placeholder ? " chat-text-pending" : ""}`}>{msg.text}</span>
+        : !hasThinking && <span className="chat-text chat-text-pending">...</span>
+      }
       {hasThinking && (
         <button
           className="thinking-toggle"

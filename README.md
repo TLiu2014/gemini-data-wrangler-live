@@ -8,7 +8,7 @@ Talk to the AI agent via live voice, and watch it manipulate your data pipeline 
 
 - **Frontend:** React + Vite, React Flow, DuckDB-WASM, Recharts
 - **Backend:** Node.js + Fastify, WebSockets
-- **AI:** Gemini 2.0 Flash via Google ADK (TypeScript)
+- **AI:** Gemini 2.5 Flash Native Audio (`gemini-2.5-flash-native-audio-preview-09-2025`) via Google GenAI SDK
 - **Deploy:** Google Cloud Run
 
 ## Prerequisites
@@ -61,6 +61,14 @@ ui/                React + Vite SPA
       FlowPane.tsx      React Flow data pipeline canvas
       DataTable.tsx     DuckDB query results table
 ```
+
+## Known Issues
+
+### Gemini Model: "1008 Tool Calling" Bug
+
+The newer `gemini-2.5-flash-native-audio-preview-12-2025` model has a known server-side regression where function calling (tools) over WebSockets causes an abrupt disconnect with WebSocket close code **1008**: _"Operation is not implemented, or supported, or enabled."_ This happens when Gemini attempts to send a tool call response back to the client.
+
+**Workaround:** This project uses `gemini-2.5-flash-native-audio-preview-09-2025`, which does not have this bug. The model ID is configured in `server/src/agent/gemini-live.ts`. If Google releases a newer preview that fixes the regression, update the `GEMINI_MODEL` constant.
 
 ## License
 

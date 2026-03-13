@@ -22,7 +22,7 @@ Upload CSVs, speak naturally ("join these two tables", "filter by active custome
 
 | Layer | Technology |
 |---|---|
-| AI Model | Gemini 2.5 Flash Native Audio (`gemini-2.5-flash-native-audio-preview-12-2025`) |
+| AI Model | Gemini 2.5 Flash Native Audio (`gemini-2.5-flash-native-audio-preview-09-2025`) |
 | SDK | Google GenAI SDK (`@google/genai`) — Live API with function calling |
 | Cloud | Google Cloud Run (backend hosting, WebSocket support) |
 | Backend | Node.js + Fastify + `@fastify/websocket` |
@@ -38,6 +38,7 @@ Upload CSVs, speak naturally ("join these two tables", "filter by active custome
 - **DuckDB-WASM BigInt serialization** was a recurring pain point — JavaScript's `JSON.stringify` can't handle BigInt. Coercing to Number in the result parser solved it cleanly.
 - **Node timing in React Flow** — calling `connectNode` right after `addNode` fails because React hasn't re-rendered yet. A short `setTimeout` (80ms) lets the new node appear in `nodesRef` before wiring edges.
 - **Stage type detection from SQL** requires care — naive `includes("JOIN")` matches table names like `customer_orders_join`. Stripping quoted identifiers and using word-boundary regex (`/\bJOIN\b/i`) fixes this.
+- **"1008 Tool Calling" bug in the 12-2025 model** — `gemini-2.5-flash-native-audio-preview-12-2025` has a server-side regression where function calling over WebSockets triggers an immediate disconnect (code 1008: "Operation is not implemented, or supported, or enabled"). The bug fires the moment Gemini tries to return a tool call to the client. Switching to the 09-2025 preview resolves the issue. This is a known, widely reported problem on Google AI forums.
 
 ---
 

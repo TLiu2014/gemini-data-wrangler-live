@@ -11,6 +11,8 @@ export function useAudioPlayback() {
   const [paused, setPaused] = useState(false);
   const playingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  // After interrupt, suppress new chunks briefly so audio doesn't immediately resume
+  const suppressUntilRef = useRef(0);
 
   const getContext = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
@@ -28,9 +30,9 @@ export function useAudioPlayback() {
 
   const playChunk = useCallback(
     (base64: string) => {
-      // While paused, drop new chunks. Already-scheduled audio stays queued in the
-      // suspended AudioContext and will resume from the right position when resumed.
+      // While paused or suppressed after interrupt, drop new chunks.
       if (pausedRef.current) return;
+      if (Date.now() < suppressUntilRef.current) return;
 
       const ctx = getContext();
 
@@ -83,11 +85,16 @@ export function useAudioPlayback() {
     setIsPlaying(false);
   }, []);
 
-  // Interrupt: clear all queued audio but keep session alive
+  // Interrupt: clear all queued audio but keep session alive.
+  // Suppress new chunks for 1s so the user has time to speak.
   const interrupt = useCallback(() => {
     if (playingTimeoutRef.current) { clearTimeout(playingTimeoutRef.current); playingTimeoutRef.current = null; }
+    suppressUntilRef.current = Date.now() + 1000;
     const ctx = ctxRef.current;
-    if (!ctx || ctx.state === "closed") return;
+    if (!ctx || ctx.state === "closed") {
+      setIsPlaying(false);
+      return;
+    }
     ctx.close();
     ctxRef.current = null;
     analyserRef.current = null;
@@ -106,14 +113,14 @@ export function useAudioPlayback() {
     void ctx.suspend();
   }, []);
 
-  // Resume: unfreeze the AudioContext and re-enable incoming chunks
+  // Resume: unfreeze the AudioContext and re-enable incoming chunks.
+  // Keep nextStartRef as-is so new chunks queue AFTER pre-pause audio finishes
+  // (resetting to 0 causes overlap = "multiple voice tracks").
   const resume = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx || ctx.state !== "suspended") return;
     void ctx.resume().then(() => {
       pausedRef.current = false;
-      // Reset nextStart so any future chunks queue from the current playback position
-      nextStartRef.current = 0;
       setPaused(false);
     });
   }, []);

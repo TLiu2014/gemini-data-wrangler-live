@@ -1,5 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import * as duckdb from "@duckdb/duckdb-wasm";
+import * as arrow from "apache-arrow";
+import Papa from "papaparse";
 import duckdb_wasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
@@ -14,6 +16,11 @@ export interface TableInfo {
   id: string;
   name: string;
   data: TableData;
+}
+
+interface ParsedCsvResult {
+  rows: Record<string, unknown>[];
+  headers: string[];
 }
 
 export function useDuckDB() {
@@ -46,6 +53,48 @@ export function useDuckDB() {
     return { columns, rows };
   };
 
+  const quoteIdent = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+  const parseCsvText = useCallback((csvText: string): ParsedCsvResult => {
+    const parsed = Papa.parse<Record<string, unknown>>(csvText, {
+      header: true,
+      skipEmptyLines: "greedy",
+      dynamicTyping: true,
+      transformHeader: (header) => header.trim(),
+    });
+
+    const fatalErrors = parsed.errors.filter((error) => error.code !== "UndetectableDelimiter");
+    if (fatalErrors.length > 0) {
+      throw new Error(fatalErrors[0]?.message ?? "Failed to parse CSV");
+    }
+
+    const headers = (parsed.meta.fields ?? []).map((header) => header.trim()).filter(Boolean);
+    if (headers.length === 0) {
+      throw new Error("CSV must include a header row");
+    }
+
+    const rows = parsed.data.map((row) => {
+      const normalized: Record<string, unknown> = {};
+      for (const header of headers) {
+        const value = row[header];
+        normalized[header] = value === "" ? null : value;
+      }
+      return normalized;
+    });
+
+    return { rows, headers };
+  }, []);
+
+  const createEmptyTable = useCallback(async (tableName: string, headers: string[]) => {
+    const conn = connRef.current;
+    if (!conn) throw new Error("Database not ready");
+
+    const columnsSql = headers
+      .map((header) => `${quoteIdent(header)} VARCHAR`)
+      .join(", ");
+    await conn.query(`CREATE TABLE ${quoteIdent(tableName)} (${columnsSql})`);
+  }, []);
+
   const ensureInit = useCallback(async () => {
     if (dbRef.current && connRef.current) return;
 
@@ -58,11 +107,38 @@ export function useDuckDB() {
     const logger = new duckdb.ConsoleLogger();
     const db = new duckdb.AsyncDuckDB(logger, worker);
     await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+    await db.open({ path: ':memory:' });
 
     dbRef.current = db;
     connRef.current = await db.connect();
     setReady(true);
   }, []);
+
+  const resetDatabase = useCallback(async () => {
+    genRef.current++;
+    try {
+      await connRef.current?.close();
+    } catch {}
+    try {
+      await dbRef.current?.terminate();
+    } catch {}
+
+    connRef.current = null;
+    dbRef.current = null;
+    setReady(false);
+    setInitError(null);
+    setLoading(false);
+    setTables([]);
+    setActiveTableId(null);
+    setError(null);
+
+    try {
+      await ensureInit();
+      setInitError(null);
+    } catch (err) {
+      setInitError(err instanceof Error ? err.message : String(err));
+    }
+  }, [ensureInit]);
 
   // Generation counter: incremented on cleanup so in-flight loads from a
   // prior mount (React StrictMode double-invoke, HMR) silently abort instead
@@ -98,42 +174,20 @@ export function useDuckDB() {
       await ensureInit();
       if (isStale()) return null;
 
-      const db = dbRef.current!;
       const conn = connRef.current!;
 
-      const internalFileName = `table_${name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.csv`;
-
-      // Wrap DuckDB operations so that errors from a terminated (stale)
-      // instance are silently ignored instead of surfacing to the UI.
       try {
-        await db.registerFileText(internalFileName, csvText);
+        const { rows, headers } = parseCsvText(csvText);
         if (isStale()) return null;
 
         await conn.query(`DROP TABLE IF EXISTS "${name}"`);
         if (isStale()) return null;
 
-        // DuckDB-WASM can intermittently lose a just-registered virtual file
-        // during rapid reload/re-init flows. Retry once after re-registering.
-        let inserted = false;
-        for (let attempt = 0; attempt < 2 && !inserted; attempt++) {
-          try {
-            await conn.insertCSVFromPath(internalFileName, {
-              name,
-              header: true,
-              detect: true,
-              create: true,
-            });
-            inserted = true;
-          } catch (err) {
-            const msg = String(err);
-            const noFileMatch = msg.includes("No files found that match the pattern");
-            if (attempt === 0 && noFileMatch) {
-              await db.registerFileText(internalFileName, csvText);
-              if (isStale()) return null;
-              continue;
-            }
-            throw err;
-          }
+        if (rows.length > 0) {
+          const arrowTable = arrow.tableFromJSON(rows);
+          await conn.insertArrowTable(arrowTable, { name, create: true });
+        } else {
+          await createEmptyTable(name, headers);
         }
         if (isStale()) return null;
 
@@ -156,13 +210,11 @@ export function useDuckDB() {
         setActiveTableId(name);
         return name;
       } catch (err) {
-        // If the generation changed, this error is from a stale DB instance
-        // (HMR / StrictMode double-mount) — ignore it silently.
         if (isStale()) return null;
-        throw err; // real error — let caller handle it
+        throw err;
       }
     },
-    [ensureInit],
+    [createEmptyTable, ensureInit, parseCsvText],
   );
 
   const loadCSV = useCallback(
@@ -242,7 +294,7 @@ export function useDuckDB() {
   );
 
   const executeStage = useCallback(
-    async (sql: string, resultName: string): Promise<string | null> => {
+    async (sql: string, resultName: string): Promise<TableInfo | null> => {
       const conn = connRef.current;
       if (!conn) {
         setError("Database not ready");
@@ -264,7 +316,7 @@ export function useDuckDB() {
           return [...prev, tableInfo];
         });
         setActiveTableId(resultName);
-        return resultName;
+        return tableInfo;
       } catch (err) {
         setError(String(err));
         return null;
@@ -327,5 +379,6 @@ export function useDuckDB() {
     executeStage,
     dropTable,
     getSchemas,
+    resetDatabase,
   };
 }

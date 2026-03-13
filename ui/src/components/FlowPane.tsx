@@ -65,6 +65,7 @@ interface StageNodeData {
   onToggleExpand?: (nodeId: string) => void;
   expanded?: boolean;
   stageConfig?: StageConfig;
+  executionState?: "pending" | "running" | "success" | "error";
 }
 
 function StageNodeCard(props: NodeProps) {
@@ -73,6 +74,7 @@ function StageNodeCard(props: NodeProps) {
   const color = getStageColor(data.stageType);
   const isStart = data.stageType.toUpperCase() === "START";
   const isLoad = data.stageType.toUpperCase() === "LOAD";
+  const [isHovered, setIsHovered] = useState(false);
   const tableName =
     data.tableName ??
     (isLoad && data.label.startsWith("LOAD: ")
@@ -88,6 +90,8 @@ function StageNodeCard(props: NodeProps) {
   return (
     <div
       className="stage-node-card"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       style={{
         background: isCustom ? GEMINI_GRADIENT : "#ffffff",
         border: isCustom ? "none" : `1.5px solid ${color}`,
@@ -117,9 +121,13 @@ function StageNodeCard(props: NodeProps) {
         lineStyle={{ border: "none" }}
         handleStyle={{ opacity: 0 }}
       />
-      <Handle id="target-top" type="target" position={Position.Top} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
-      <Handle id="target-left" type="target" position={Position.Left} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
-      <Handle id="target-right" type="target" position={Position.Right} style={isStart || isLoad ? HANDLE_STYLE_PASSTHROUGH : HANDLE_STYLE} isConnectable={!isStart && !isLoad} />
+      {!isStart && (
+        <>
+          <Handle id="target-top" type="target" position={Position.Top} style={{ ...HANDLE_STYLE_HOVER, opacity: isHovered ? 1 : 0 }} isConnectable={true} />
+          <Handle id="target-left" type="target" position={Position.Left} style={{ ...HANDLE_STYLE_HOVER, opacity: isHovered ? 1 : 0 }} isConnectable={true} />
+          <Handle id="target-right" type="target" position={Position.Right} style={{ ...HANDLE_STYLE_HOVER, opacity: isHovered ? 1 : 0 }} isConnectable={true} />
+        </>
+      )}
       <div style={{ position: "relative", zIndex: 1, padding: isCustom ? 3.5 : 0 }}>
 
       <div
@@ -207,6 +215,19 @@ function StageNodeCard(props: NodeProps) {
         )}
       </div>
 
+      {/* Execution state badge */}
+      {!isStart && !isLoad && (
+        data.executionState === "running" ? (
+          <div className="node-exec-badge running">Running...</div>
+        ) : data.executionState === "error" ? (
+          <div className="node-exec-badge error">Error</div>
+        ) : tableName ? (
+          <div className="node-exec-badge success">Done</div>
+        ) : (
+          <div className="node-exec-badge pending">Pending</div>
+        )
+      )}
+
       {expanded && (config || isCustom) && (
         <div className="stage-node-details" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #e8eaed", fontSize: 10, color: "#5f6368" }}>
           {config?.type?.toUpperCase() === "JOIN" && (
@@ -259,23 +280,22 @@ function StageNodeCard(props: NodeProps) {
       )}
 
       </div>{/* end inner z-1 wrapper */}
-      <Handle id="source-bottom" type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <Handle id="source-bottom" type="source" position={Position.Bottom} style={{ ...HANDLE_STYLE_HOVER, opacity: isHovered ? 1 : 0 }} />
     </div>
   );
 }
 
-const HANDLE_STYLE = {
-  width: 8,
-  height: 8,
+const HANDLE_SIZE = 10;
+
+const HANDLE_STYLE_HOVER = {
+  width: HANDLE_SIZE,
+  height: HANDLE_SIZE,
   borderRadius: "50%",
-  border: "1px solid #9ca3af",
+  border: "1.5px solid #9ca3af",
   background: "#ffffff",
+  transition: "opacity 0.15s ease",
 };
 
-const HANDLE_STYLE_PASSTHROUGH = {
-  ...HANDLE_STYLE,
-  pointerEvents: "none" as const,
-};
 
 const nodeTypes = { stage: StageNodeCard };
 
@@ -417,6 +437,28 @@ export interface FlowPaneHandle {
   updateNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
   connectNode: (nodeId: string, sourceTableNames?: string[]) => void;
   removeNodeByTableName: (tableName: string) => boolean;
+  removeNode: (nodeId: string) => void;
+  resetGraph: () => void;
+  getGraphState: () => GraphState;
+  getFlowElement: () => HTMLElement | null;
+}
+
+export interface GraphState {
+  nodes: Array<{
+    id: string;
+    stageType: string;
+    label: string;
+    x: number;
+    y: number;
+    tableName?: string;
+    stageConfig?: StageConfig;
+    executionState?: string;
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+  }>;
 }
 
 export interface FlowSnapshot {
@@ -437,8 +479,9 @@ export interface FlowSnapshot {
 interface FlowPaneProps {
   onFlowChange?: (snapshot: FlowSnapshot) => void;
   onShowTableByName?: (tableName: string) => void;
-  onConfigureStage?: (nodeId: string, stageType: string) => void;
+  onConfigureStage?: (nodeId: string, stageType: string, isNew?: boolean) => void;
   onNodeDeleted?: (nodeId: string, stageType: string) => void;
+  onExecuteCanvas?: () => void;
 }
 
 /* ─── Helpers ─── */
@@ -490,7 +533,7 @@ function FitViewOnChange({ trigger }: { trigger: number }) {
 }
 
 function FlowPaneInner(
-  { onFlowChange, onShowTableByName, onConfigureStage, onNodeDeleted }: FlowPaneProps,
+  { onFlowChange, onShowTableByName, onConfigureStage, onNodeDeleted, onExecuteCanvas }: FlowPaneProps,
   ref: React.ForwardedRef<FlowPaneHandle>,
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -501,6 +544,9 @@ function FlowPaneInner(
   const [showStageMenu, setShowStageMenu] = useState(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+  const flowElRef = useRef<HTMLDivElement>(null);
 
   const onToggleExpand = useCallback((nodeId: string) => {
     setNodes((prev) =>
@@ -850,15 +896,50 @@ function FlowPaneInner(
     (type: string) => {
       setShowStageMenu(false);
       const nodeId = addNode(type, type, { deferEdges: true });
-      if (nodeId) onConfigureStage?.(nodeId, type);
+      if (nodeId) onConfigureStage?.(nodeId, type, true);
     },
     [addNode, onConfigureStage],
   );
 
-  useImperativeHandle(ref, () => ({ addNode, updateNodeData, connectNode, removeNodeByTableName }), [addNode, updateNodeData, connectNode, removeNodeByTableName]);
+  const removeNode = useCallback(
+    (nodeId: string) => {
+      setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+      setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    },
+    [setNodes, setEdges],
+  );
+
+  const resetGraph = useCallback(() => {
+    idRef.current = 1;
+    setShowStageMenu(false);
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+    setFitTrigger(++fitTriggerRef.current);
+  }, [setEdges, setNodes]);
+
+  useImperativeHandle(ref, () => ({
+    addNode, updateNodeData, connectNode, removeNodeByTableName, removeNode, resetGraph,
+    getGraphState: () => ({
+      nodes: nodesRef.current.map((n) => {
+        const d = n.data as unknown as StageNodeData;
+        return {
+          id: n.id,
+          stageType: String(d.stageType ?? "custom"),
+          label: String(d.label ?? ""),
+          x: n.position.x,
+          y: n.position.y,
+          tableName: d.tableName,
+          stageConfig: d.stageConfig,
+          executionState: d.executionState,
+        };
+      }),
+      edges: edgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+    }),
+    getFlowElement: () => flowElRef.current,
+  }), [addNode, updateNodeData, connectNode, removeNodeByTableName, removeNode, resetGraph]);
 
   return (
-    <div className="flow-pane-inner">
+    <div className="flow-pane-inner" ref={flowElRef}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -886,7 +967,7 @@ function FlowPaneInner(
         <Background color="#dadce0" gap={20} />
         <Controls />
         <Panel position="bottom-right" style={{ margin: 12 }}>
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "flex-end" }}>
             {showStageMenu && (
               <div className="stage-menu">
                 {STAGE_OPTIONS.map((opt) => (
@@ -910,6 +991,11 @@ function FlowPaneInner(
             >
               + Add Stage
             </button>
+            {onExecuteCanvas && (
+              <button className="execute-canvas-btn" onClick={onExecuteCanvas}>
+                Execute Canvas
+              </button>
+            )}
           </div>
         </Panel>
       </ReactFlow>
