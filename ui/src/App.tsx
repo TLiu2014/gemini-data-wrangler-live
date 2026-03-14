@@ -123,14 +123,6 @@ export default function App() {
   const handleApiKeyChange = useCallback((key: string) => {
     setApiKey(key);
     sessionStorage.setItem("gemini_api_key", key);
-    // Persist to server (encrypted on disk)
-    if (key.trim()) {
-      fetch("/api/settings/api-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: key.trim() }),
-      }).catch(() => {});
-    }
   }, []);
 
   // Check if the server already has an API key configured (e.g. via .env)
@@ -339,6 +331,7 @@ export default function App() {
 
   // WebSocket
   const { status, geminiError, connect, disconnect, send } = useWebSocket({
+    apiKey,
     onAudio: (payload) => {
       noteCanvasResponseActivity();
       playChunk(payload.data);

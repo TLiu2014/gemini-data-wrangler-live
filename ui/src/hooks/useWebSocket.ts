@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from "react";
 
 export interface WsMessage {
-  type: "audio" | "screenshot" | "action" | "sql" | "status" | "text" | "user_text" | "thinking" | "interrupted" | "schema" | "tool_result" | "canvas_execute" | "canvas_complete" | "connect_intro";
+  type: "init" | "audio" | "screenshot" | "action" | "sql" | "status" | "text" | "user_text" | "thinking" | "interrupted" | "schema" | "tool_result" | "canvas_execute" | "canvas_complete" | "connect_intro";
   payload: unknown;
 }
 
@@ -13,6 +13,7 @@ export type ActionPayload = {
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
 interface UseWebSocketOptions {
+  apiKey?: string;
   onAudio?: (payload: { data: string; mimeType: string }) => void;
   onAction?: (payload: ActionPayload) => void;
   onSql?: (payload: { sql: string; description: string }) => void;
@@ -41,7 +42,14 @@ export function useWebSocket(opts: UseWebSocketOptions = {}) {
 
     // WS open just means the transport is up; keep "connecting" until the
     // Gemini Live session is confirmed via a status message from the server.
-    ws.onopen = () => {}; // stay "connecting"
+    // Send the API key immediately so the server can start the Gemini session
+    // for this specific connection (no shared server-side key needed).
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: "init",
+        payload: { apiKey: optsRef.current.apiKey ?? "" },
+      }));
+    };
 
     ws.onmessage = (event) => {
       try {

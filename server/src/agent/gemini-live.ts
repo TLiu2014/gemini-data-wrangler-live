@@ -2,7 +2,6 @@ import { GoogleGenAI, Modality, type Session } from "@google/genai";
 import type { WebSocket } from "@fastify/websocket";
 import type { WsMessage } from "../ws.js";
 import { getToolDeclarations, handleToolCall } from "./tools.js";
-import { resolveApiKey } from "../apiKeyStore.js";
 
 // Dual-model setup:
 // • CHAT model  — used for the persistent voice session. 12-2025 has superior audio
@@ -83,10 +82,8 @@ export class GeminiLiveSession {
   private static readonly CANVAS_GUARD_MS = 60000;
   private static readonly EXECUTE_CLEANUP_DELAY_MS = 15_000;
 
-  constructor(clientSocket: WebSocket) {
+  constructor(clientSocket: WebSocket, apiKey: string) {
     this.clientSocket = clientSocket;
-    const apiKey = resolveApiKey();
-    if (!apiKey) throw new Error("GOOGLE_API_KEY not set");
     this.ai = new GoogleGenAI({ apiKey });
   }
 

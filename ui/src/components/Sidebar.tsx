@@ -67,11 +67,11 @@ interface SidebarProps {
 }
 
 function deriveAgentStatus(status: string, hasApiKey: boolean, geminiError: string | null): { text: string; level: "ok" | "warn" | "error" | "off" } {
-  if (!hasApiKey) return { text: "API key missing — set in Settings or .env", level: "warn" };
+  if (!hasApiKey) return { text: "API key missing — set in Settings ⚙", level: "warn" };
   if (status === "error") return { text: geminiError ?? "Gemini session failed", level: "error" };
   if (status === "connected") return { text: "Agent connected", level: "ok" };
   if (status === "connecting") return { text: "Connecting to Gemini...", level: "warn" };
-  return { text: "Disconnected", level: "off" };
+  return { text: "API key set — ready to connect", level: "ok" };
 }
 
 function exportChatLog(chatLog: ChatMessage[]) {

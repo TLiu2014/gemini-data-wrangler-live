@@ -101,7 +101,7 @@ export default function TopBar({
                 </button>
               </div>
               <p className="settings-hint">
-                Stored in session only. Get a key at{" "}
+                Stored in your browser session only — never sent to any server except directly to Gemini. Get a free key at{" "}
                 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
                   aistudio.google.com
                 </a>

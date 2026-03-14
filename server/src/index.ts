@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { registerWebSocketRoutes } from "./ws.js";
-import { resolveApiKey, saveEncryptedApiKey, validateApiKey } from "./apiKeyStore.js";
+import { resolveApiKey } from "./apiKeyStore.js";
 import dotenv from "dotenv";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -20,28 +20,12 @@ async function main() {
   await app.register(websocket);
   registerWebSocketRoutes(app);
 
-  // Health / config endpoint — lets the frontend know the server has an API key
+  // Health endpoint — hasApiKey tells the UI whether a server-side key is
+  // configured (only relevant for local dev with GOOGLE_API_KEY in .env).
   app.get("/health", async () => ({
     ok: true,
     hasApiKey: !!resolveApiKey(),
   }));
-
-  // Save API key from UI settings (encrypted on disk)
-  app.post("/api/settings/api-key", async (req, reply) => {
-    const { apiKey } = (req.body as { apiKey?: string }) || {};
-    const trimmed = typeof apiKey === "string" ? apiKey.trim() : "";
-    if (!trimmed) {
-      return reply.status(400).send({ error: "API key is required." });
-    }
-    if (!validateApiKey(trimmed)) {
-      return reply.status(400).send({ error: "Invalid API key format." });
-    }
-    const result = saveEncryptedApiKey(trimmed);
-    if (!result.ok) {
-      return reply.status(500).send({ error: result.error });
-    }
-    return { success: true };
-  });
 
   // In production, serve the built UI static files
   const uiDistPath = resolve(__dirname, "../../ui/dist");

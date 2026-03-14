@@ -21,20 +21,24 @@ gcloud services enable \
   artifactregistry.googleapis.com
 ```
 
+## API Key Model
+
+**No server-side API key is needed for deployment.** Each user provides their own Gemini API key via the Settings panel in the UI. The key is stored in the browser's `sessionStorage` and sent to the server only as part of the WebSocket handshake — it is used exclusively for that user's session and never persisted server-side.
+
+For local development, you can still set `GOOGLE_API_KEY` in your `.env` file as a fallback (used when the browser sends no key), but this is optional and not recommended for production.
+
 ## Deploy
 
 ```bash
 # Set your project and preferred region
 export GCP_PROJECT="your-project-id"
 export GCP_REGION="us-central1"
-export GOOGLE_API_KEY="your-gemini-api-key"
 
-# Build and deploy in one command
+# Build and deploy — no API key env var needed
 gcloud run deploy gemini-data-wrangler-live \
   --project $GCP_PROJECT \
   --region $GCP_REGION \
   --source . \
-  --set-env-vars "GOOGLE_API_KEY=$GOOGLE_API_KEY" \
   --allow-unauthenticated \
   --port 8080 \
   --session-affinity \
@@ -78,29 +82,36 @@ docker run -p 8080:8080 -e GOOGLE_API_KEY="your-key" gemini-data-wrangler-live
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│            Google Cloud Run              │
-│  ┌─────────────────────────────────────┐ │
-│  │   Node.js (Fastify)                 │ │
-│  │   ├── /ws         → WebSocket       │ │
-│  │   ├── /health     → Health check    │ │
-│  │   └── /*          → Static UI       │ │
-│  └──────────┬──────────────────────────┘ │
-│             │ Gemini Live API            │
-│             ▼                            │
-│  ┌─────────────────────┐                 │
-│  │  Google AI Studio   │                 │
-│  │  (Gemini 2.5 Flash) │                 │
-│  └─────────────────────┘                 │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│              Google Cloud Run                 │
+│  ┌──────────────────────────────────────────┐ │
+│  │          Node.js (Fastify)               │ │
+│  │  ├── /ws         → WebSocket             │ │
+│  │  ├── /health     → Health check          │ │
+│  │  └── /*          → Static UI             │ │
+│  │                                          │ │
+│  │  GeminiLiveSession (per client)          │ │
+│  │  ├── Chat session    (12-2025)           │ │
+│  │  │   persistent, voice conversation      │ │
+│  │  └── Execute session (09-2025) on-demand │ │
+│  │      SQL tool calls, pipeline execution  │ │
+│  └───────────────────┬──────────────────────┘ │
+│                      │ Gemini Live API         │
+│                      ▼                         │
+│  ┌──────────────────────────────────────────┐ │
+│  │  Google AI Studio (Gemini 2.5 Flash)     │ │
+│  └──────────────────────────────────────────┘ │
+└──────────────────────────────────────────────┘
          ▲
          │ HTTPS + WSS
          │
-┌────────┴────────┐
-│    Browser      │
-│  ├── React UI   │
-│  └── DuckDB-WASM│
-└─────────────────┘
+┌────────┴────────────────┐
+│    Browser               │
+│  ├── React UI            │
+│  │   (React Flow, etc.)  │
+│  └── DuckDB-WASM         │
+│      (all SQL in-browser)│
+└──────────────────────────┘
 ```
 
 ## Cost

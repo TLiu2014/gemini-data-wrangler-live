@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "@fastify/websocket";
 import { GeminiLiveSession } from "./agent/gemini-live.js";
+import { resolveApiKey, validateApiKey } from "./apiKeyStore.js";
 
 export interface WsMessage {
   type:
+    | "init"
     | "audio"
     | "screenshot"
     | "action"
@@ -28,17 +30,28 @@ export function registerWebSocketRoutes(app: FastifyInstance) {
 
       let gemini: GeminiLiveSession | null = null;
 
-      // Start Gemini Live session for this client
-      try {
-        gemini = new GeminiLiveSession(socket);
-        await gemini.connect();
-      } catch (err) {
-        console.error("Failed to start Gemini session:", err);
-        const errMsg: WsMessage = {
-          type: "status",
-          payload: { gemini: "error", detail: String(err) },
-        };
-        socket.send(JSON.stringify(errMsg));
+      // Helper to start the Gemini session with the resolved API key.
+      // Called from the "init" message handler below.
+      async function startGeminiSession(clientApiKey: string) {
+        // Client key takes precedence; fall back to server env var (localhost dev).
+        const apiKey = clientApiKey || resolveApiKey();
+        if (!apiKey) {
+          socket.send(JSON.stringify({
+            type: "status",
+            payload: { gemini: "error", detail: "No API key provided. Enter your Gemini API key in Settings." },
+          } satisfies WsMessage));
+          return;
+        }
+        try {
+          gemini = new GeminiLiveSession(socket, apiKey);
+          await gemini.connect();
+        } catch (err) {
+          console.error("Failed to start Gemini session:", err);
+          socket.send(JSON.stringify({
+            type: "status",
+            payload: { gemini: "error", detail: String(err) },
+          } satisfies WsMessage));
+        }
       }
 
       socket.on("message", async (raw: Buffer | ArrayBuffer | Buffer[]) => {
@@ -46,6 +59,21 @@ export function registerWebSocketRoutes(app: FastifyInstance) {
           const msg: WsMessage = JSON.parse(raw.toString());
 
           switch (msg.type) {
+            case "init": {
+              // First message from client — carries the user's API key for this session.
+              const payload = msg.payload as { apiKey?: string };
+              const clientKey = typeof payload?.apiKey === "string" ? payload.apiKey.trim() : "";
+              // Validate only if the client sent a key (empty means "use server env var")
+              if (clientKey && !validateApiKey(clientKey)) {
+                socket.send(JSON.stringify({
+                  type: "status",
+                  payload: { gemini: "error", detail: "Invalid API key format. Check your key in Settings." },
+                } satisfies WsMessage));
+                return;
+              }
+              await startGeminiSession(clientKey);
+              break;
+            }
             case "audio": {
               const payload = msg.payload as { data: string };
               gemini?.sendAudio(payload.data);

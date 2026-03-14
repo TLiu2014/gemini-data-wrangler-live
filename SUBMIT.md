@@ -4,56 +4,79 @@
 
 ### What it does
 
-Gemini Data Wrangler Live is a voice-driven data wrangling tool. Users talk to a Gemini AI agent to explore, join, filter, and visualize CSV data through a visual pipeline editor — no code required.
+Gemini Data Wrangler Live is a voice-driven data wrangling tool. Users talk to a Gemini AI agent to explore, join, filter, group, sort, and visualize CSV data through a visual pipeline editor — no code, no text box required.
 
-Upload CSVs, speak naturally ("join these two tables", "filter by active customers", "show me a bar chart"), and watch the pipeline build itself in real time. The agent understands your data schemas, writes SQL behind the scenes, and updates the UI instantly.
+Upload CSVs, speak naturally ("join these two tables on customer_id", "filter by active status", "show me a bar chart"), and watch the pipeline build itself in real time. The agent understands your data schemas, writes SQL behind the scenes, and updates the UI instantly.
+
+**Execute Canvas mode** extends this further: click "Execute Canvas" and Gemini analyzes the entire pipeline, identifies any incomplete stages, fills them in automatically, narrates what it's doing, and remains available for follow-up questions — all within the same 09-2025 session so the model never switches mid-conversation.
 
 ### Features
 
 - **Real-time voice interaction** — Bidirectional audio via Gemini 2.5 Flash Native Audio (Live API). You speak, Gemini speaks back and acts simultaneously.
-- **Visual pipeline editor** — React Flow graph that auto-builds as transformations are applied. Nodes represent stages (load, join, filter, group, sort). Edges show data lineage.
-- **In-browser SQL engine** — DuckDB-WASM runs all queries locally. No data leaves the browser. Supports joins, filters, aggregations, and arbitrary SQL.
-- **Schema-aware agent** — Table schemas are sent to Gemini on connect and after each upload, so it knows column names and types without asking.
-- **Undo/redo transformations** — Ask Gemini to remove a transformation; it confirms verbally, then drops the table and removes the pipeline node.
-- **Chart rendering** — Ask for bar, line, or pie charts. Recharts renders them inline from the active table data.
-- **Unified chat log** — Full conversation transcript with collapsible "thinking" sections showing Gemini's reasoning.
+- **Execute Canvas mode** — One-click pipeline execution. Gemini receives the full graph state, announces the loaded tables and what it's about to do, executes each incomplete stage in dependency order with SQL, narrates results after each step, and announces completion. Follow-up voice questions stay on the same execute session.
+- **Dynamic execution status** — While Gemini warms up, the transcript shows "Analyzing pipeline..." instead of a blank spinner. The status line updates as stages complete ("Completed join. Working on filter...").
+- **Visual pipeline editor** — React Flow graph that auto-builds as transformations are applied. Stage nodes are color-coded by type (LOAD, JOIN, FILTER, GROUP, SELECT, SORT, UNION). Gradient edges show data lineage. Double-click any node to reconfigure.
+- **In-browser SQL engine** — DuckDB-WASM runs all queries locally. No data ever leaves the browser.
+- **Schema-aware agent** — Table schemas are injected into Gemini on connect and after each upload. Strict column-name rules in the system instruction and execute prompt prevent hallucination (e.g., inventing "date" when the actual column is "order_date"). SQL error recovery uses DuckDB's "Candidate bindings" error messages to self-correct and retry.
+- **Pause / Resume** — Pause Gemini's audio mid-response without interrupting the session. The transcript freezes in sync (buffered text flushes on resume). Pre-pause audio finishes before new audio queues — no overlap.
+- **Interrupt** — Stop Gemini's current response with one click. Audio and text both suppress immediately. Suppression is indefinite (not time-based) and lifts only when the server confirms the model stopped, so the next response plays cleanly.
+- **Undo transformations** — Ask Gemini to remove a transformation; it confirms verbally, then drops the table and removes the pipeline node.
+- **Chart rendering** — Ask for bar, line, or pie charts; Recharts renders them inline from the active table data.
+- **Unified chat log** — Full conversation transcript (user + Gemini) with collapsible "thinking" sections showing Gemini's reasoning.
+- **Multi-table support** — Tab bar for switching between all loaded CSV tables and computed result tables.
 
 ### Technologies
 
 | Layer | Technology |
 |---|---|
-| AI Model | Gemini 2.5 Flash Native Audio (`gemini-2.5-flash-native-audio-preview-09-2025`) |
+| AI (chat session) | Gemini 2.5 Flash Native Audio `gemini-2.5-flash-native-audio-preview-12-2025` |
+| AI (execute session) | Gemini 2.5 Flash Native Audio `gemini-2.5-flash-native-audio-preview-09-2025` |
 | SDK | Google GenAI SDK (`@google/genai`) — Live API with function calling |
 | Cloud | Google Cloud Run (backend hosting, WebSocket support) |
 | Backend | Node.js + Fastify + `@fastify/websocket` |
 | Frontend | React 19 + Vite + TypeScript |
-| Flow Editor | @xyflow/react v12 (React Flow) |
+| Flow Editor | @xyflow/react (React Flow) |
 | SQL Engine | DuckDB-WASM (runs entirely in the browser) |
 | Charts | Recharts |
 
-### Findings and learnings
+### Findings and Learnings
 
-- **Gemini Live API + function calling is powerful for agentic UX.** The model can reason about table schemas and emit tool calls mid-conversation, making the voice-to-action loop feel instantaneous.
-- **Deferred tool results** are essential for tools that need UI confirmation (e.g. undo). The server sends the action to the frontend, the frontend confirms with the user, executes, and sends the result back to Gemini via the same WebSocket.
-- **DuckDB-WASM BigInt serialization** was a recurring pain point — JavaScript's `JSON.stringify` can't handle BigInt. Coercing to Number in the result parser solved it cleanly.
-- **Node timing in React Flow** — calling `connectNode` right after `addNode` fails because React hasn't re-rendered yet. A short `setTimeout` (80ms) lets the new node appear in `nodesRef` before wiring edges.
-- **Stage type detection from SQL** requires care — naive `includes("JOIN")` matches table names like `customer_orders_join`. Stripping quoted identifiers and using word-boundary regex (`/\bJOIN\b/i`) fixes this.
-- **"1008 Tool Calling" bug in the 12-2025 model** — `gemini-2.5-flash-native-audio-preview-12-2025` has a server-side regression where function calling over WebSockets triggers an immediate disconnect (code 1008: "Operation is not implemented, or supported, or enabled"). The bug fires the moment Gemini tries to return a tool call to the client. Switching to the 09-2025 preview resolves the issue. This is a known, widely reported problem on Google AI forums.
+**Gemini Live API + function calling is powerful for agentic UX.** The model can reason about table schemas and emit tool calls mid-conversation, making the voice-to-action loop feel instantaneous. The system instruction and per-turn context injection together shape reliable behavior for a niche domain (data wrangling).
+
+**Dual-model architecture solves the audio quality vs. tool-calling dilemma.** `12-2025` has superior audio but a known 1008 regression that disconnects the session the moment it tries to return a tool call. `09-2025` doesn't have this bug. Running them as two separate Live sessions from the same server class — one persistent (chat), one on-demand (execute) — gives the best of both models without user-visible switching.
+
+**Execute session routing must follow the user's voice.** When the execute session is active, `sendRealtimeInput` must target it (not the chat session). `inputAudioTranscription: {}` must also be set on the execute session config — it's easy to omit from an on-demand session that was originally text-only, causing user speech to be processed but never transcribed.
+
+**Audio suppression on interrupt requires `Infinity`, not a timer.** Setting `suppressUntilRef = Date.now() + 1000` lets Gemini's stream resume after 1 second — the model doesn't actually stop instantly. Setting it to `Infinity` and only clearing it when the server sends a confirmed `interrupted` event ensures complete silence until the next response is intentional.
+
+**Pause/resume audio overlap.** Resetting `nextStartRef` to 0 on resume causes pre-pause audio chunks (still queued in the AudioContext) to overlap with new chunks. Keeping `nextStartRef` intact so new chunks schedule after existing audio fixes this.
+
+**React state vs. synchronous refs for pause timing.** Updating `audioPaused` via `useEffect` (async) means `onText` can still buffer chunks briefly after resume. Using a plain `useRef` updated synchronously in the handler eliminates the race.
+
+**Column name hallucination** is a real problem for SQL-generating agents. "date", "name", "region" are common guesses that don't exist in typical schemas. Combining three defenses works: (1) inject the exact schema into every `[DATA CONTEXT]` message, (2) add an "EXACT COLUMN NAMES" rule to the system instruction and execute prompt, (3) add an "SQL ERROR RECOVERY" rule instructing Gemini to use DuckDB's "Candidate bindings" suggestions when a column-not-found error occurs.
+
+**Deferred tool results** are essential for tools that need UI-side execution (executeDataTransform, removeTransform). The server sends the action to the frontend, the frontend executes in DuckDB-WASM, and sends the result back via `tool_result`. Gemini resumes its response only after the real result arrives.
+
+**DuckDB-WASM BigInt serialization** — JavaScript's `JSON.stringify` can't handle BigInt. Coercing to `Number` in the result parser solved it cleanly.
+
+**Node timing in React Flow** — calling `connectNode` right after `addNode` fails because React hasn't re-rendered yet. A short `setTimeout` (80ms) lets the new node appear in `nodesRef` before wiring edges.
+
+**Stage type detection from SQL** requires care — naive `includes("JOIN")` matches table names like `customer_orders_join`. Stripping quoted identifiers and using word-boundary regex (`/\bJOIN\b/i`) fixes this.
 
 ---
 
 ## 2. Public Code Repository
 
-**URL:** `https://github.com/TLiu2014/gemini-data-wrangler-live-live`
+**URL:** `https://github.com/TLiu2014/gemini-data-wrangler-live`
 
 Spin-up instructions are in the README. Summary:
 
 ```bash
-git clone https://github.com/TLiu2014/gemini-data-wrangler-live-live.git
-cd gemini-data-wrangler-live-live
+git clone https://github.com/TLiu2014/gemini-data-wrangler-live.git
+cd gemini-data-wrangler-live
 cp .env.example .env        # add your GOOGLE_API_KEY
 npm install
-npm run dev                  # opens at http://localhost:5173
+npm start                    # opens at http://localhost:5173
 ```
 
 ---
@@ -88,7 +111,7 @@ Make a short screen recording (30–60 seconds) showing the backend running on G
 1. Click the **Logs** tab (or go to Cloud Logging)
 2. Show recent log entries — you should see:
    - `Backend listening on http://0.0.0.0:8080`
-   - `Gemini Live session opened` (if a session was active)
+   - `Gemini Live session opened`
    - HTTP request logs for `/health`, `/ws`, and static file serving
 
 #### Step 4: Live app
@@ -118,50 +141,56 @@ gcloud run deploy gemini-data-wrangler-live \
 ## 4. Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Google Cloud Run                       │
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │            Node.js / Fastify Server               │  │
-│  │                                                   │  │
-│  │  ┌──────────┐  ┌──────────────┐  ┌────────────┐  │  │
-│  │  │ /ws      │  │ /health      │  │ /*         │  │  │
-│  │  │ WebSocket│  │ Health check │  │ Static UI  │  │  │
-│  │  └────┬─────┘  └──────────────┘  └────────────┘  │  │
-│  │       │                                           │  │
-│  │       │  Gemini Live API (bidirectional stream)   │  │
-│  │       │  ┌─────────────────────────────────────┐  │  │
-│  │       └──│  Google GenAI SDK (@google/genai)   │  │  │
-│  │          │  • Audio streaming (PCM 16kHz)      │  │  │
-│  │          │  • Function calling (tools)         │  │  │
-│  │          │  • Input/output transcription        │  │  │
-│  │          └──────────────┬──────────────────────┘  │  │
-│  └─────────────────────────┼─────────────────────────┘  │
-│                            │                             │
-└────────────────────────────┼─────────────────────────────┘
-                             │
-                             ▼
-                ┌────────────────────────┐
-                │   Google AI Studio     │
-                │   Gemini 2.5 Flash     │
-                │   Native Audio Model   │
-                └────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Google Cloud Run                         │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │               Node.js / Fastify Server               │    │
+│  │                                                     │    │
+│  │  ┌──────────┐  ┌──────────────┐  ┌──────────────┐  │    │
+│  │  │ /ws      │  │ /health      │  │ /*           │  │    │
+│  │  │ WebSocket│  │ Health check │  │ Static UI    │  │    │
+│  │  └────┬─────┘  └──────────────┘  └──────────────┘  │    │
+│  │       │                                             │    │
+│  │       │         GeminiLiveSession                   │    │
+│  │       │  ┌──────────────────────────────────────┐   │    │
+│  │       └──│  Chat session (12-2025)               │   │    │
+│  │          │  • Persistent, always on              │   │    │
+│  │          │  • Voice conversation, no tool calls  │   │    │
+│  │          │                                       │   │    │
+│  │          │  Execute session (09-2025) [on-demand]│   │    │
+│  │          │  • Created on "Execute Canvas" click  │   │    │
+│  │          │  • Handles all SQL tool calls         │   │    │
+│  │          │  • Receives user audio for follow-ups │   │    │
+│  │          │  • Lives until next execute or discon.│   │    │
+│  │          └──────────────────┬───────────────────┘   │    │
+│  └─────────────────────────────┼───────────────────────┘    │
+│                                │                             │
+└────────────────────────────────┼─────────────────────────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────┐
+                    │   Google AI Studio     │
+                    │   Gemini 2.5 Flash     │
+                    │   Native Audio Models  │
+                    └────────────────────────┘
 
-         ▲ HTTPS + WSS
-         │
-┌────────┴──────────────────────────────────────┐
-│                  Browser                       │
-│                                                │
-│  ┌──────────────┐  ┌───────────────────────┐  │
-│  │  React UI    │  │  DuckDB-WASM          │  │
-│  │  • React Flow│  │  • In-browser SQL     │  │
-│  │  • Recharts  │  │  • CSV import/query   │  │
-│  │  • Audio I/O │  │  • Zero server trips  │  │
-│  └──────────────┘  └───────────────────────┘  │
-│                                                │
-│  Voice ←→ WebSocket ←→ Gemini Live API         │
-│  CSV data never leaves the browser             │
-└────────────────────────────────────────────────┘
+             ▲ HTTPS + WSS
+             │
+┌────────────┴──────────────────────────────────────────┐
+│                       Browser                          │
+│                                                        │
+│  ┌──────────────────┐  ┌───────────────────────────┐  │
+│  │  React UI        │  │  DuckDB-WASM              │  │
+│  │  • React Flow    │  │  • In-browser SQL engine  │  │
+│  │  • Recharts      │  │  • CSV import / query     │  │
+│  │  • Audio I/O     │  │  • No data leaves browser │  │
+│  │  • Pause/Resume  │  └───────────────────────────┘  │
+│  │  • Interrupt     │                                  │
+│  └──────────────────┘                                  │
+│                                                        │
+│  Voice ←→ WebSocket ←→ Gemini Live API                 │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
