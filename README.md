@@ -17,7 +17,7 @@ Talk to the AI agent via live voice, and watch it manipulate your data pipeline 
 The app is live on Cloud Run at:
 **https://gemini-data-wrangler-live-887509405386.us-central1.run.app/**
 
-https://github.com/user-attachments/assets/REPLACE_WITH_VIDEO_ID
+[▶ Watch deployment proof](https://github.com/TLiu2014/gemini-data-wrangler-live/blob/main/proof-gcp.mp4)
 
 _Screen recording: Cloud Run service dashboard → revision → logs → live app._
 
