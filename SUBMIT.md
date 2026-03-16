@@ -1,5 +1,44 @@
 # Gemini Live Agent Challenge — Submission
 
+## Elevator Pitch
+
+Talk to your data. Gemini builds the pipeline.
+
+---
+
+## About the Project
+
+### Inspiration
+
+Data wrangling tools have always been built around text — type a formula, write a query, fill a form. Even modern AI tools default to a chat box. The Gemini Live API opened a different door: what if you could just *talk* to your data the way you'd talk to a colleague? "Join these two tables on customer ID." "Filter to only active users." "Show me a bar chart of sales by region." That framing — voice as the primary interface, with a visual pipeline as the live output — was the core inspiration.
+
+### How It Was Built
+
+The app pairs a **Node.js/Fastify backend** on Google Cloud Run with a **React frontend** running entirely in the browser. The backend maintains two Gemini Live API sessions per user:
+
+- A **persistent chat session** (`gemini-2.5-flash-native-audio-preview-12-2025`) for all voice conversation — superior audio quality, no tool calls.
+- An **on-demand execute session** (`gemini-2.5-flash-native-audio-preview-09-2025`) spun up when the user clicks "Execute Canvas" — handles all SQL tool calls and pipeline execution.
+
+All SQL runs in **DuckDB-WASM** inside the browser. No CSV data ever leaves the client. The visual pipeline editor is built on **React Flow**, updating in real time as Gemini emits tool calls. Audio is streamed as raw PCM over WebSocket in both directions.
+
+### Challenges
+
+**The 1008 tool-calling bug.** `gemini-2.5-flash-native-audio-preview-12-2025` disconnects with close code 1008 the moment it attempts a function call. Debugging this took significant time — the solution was a dual-session architecture: keep the superior audio model for conversation only, and route all tool calls through `09-2025`.
+
+**Audio suppression on interrupt.** A time-based suppress window (`Date.now() + 1000ms`) wasn't enough — Gemini's stream doesn't stop instantly. Switching to `Infinity` and only clearing suppression when the server confirms the model stopped (`interrupted` event) solved the overlap.
+
+**Pause/resume audio overlap.** Resetting `nextStartRef` to 0 on resume caused pre-pause audio chunks (still queued in AudioContext) to overlap with new chunks. The fix: keep `nextStartRef` intact so new chunks schedule *after* existing audio finishes.
+
+**Column name hallucination.** SQL agents routinely invent column names like `date` or `name` that don't exist in the actual schema. Three defenses were layered: exact schema injection per turn, strict `EXACT COLUMN NAMES` rules in the system instruction, and SQL error recovery using DuckDB's "Candidate bindings" error messages to self-correct.
+
+**Deferred tool results.** Tools like `executeDataTransform` need to execute in DuckDB-WASM in the browser and return real row counts and schema — the server can't do this. The solution: server forwards the action to the frontend, frontend executes and sends back the result, server relays it to Gemini as a `tool_result`. Gemini resumes only after the real result arrives.
+
+### What Was Learned
+
+The Gemini Live API + function calling combination is genuinely powerful for agentic UX — the model reasons about schemas, emits tool calls mid-conversation, and narrates what it's doing, making the voice-to-action loop feel instantaneous. The biggest lesson: production-quality audio UX requires thinking in terms of streams and events, not request/response cycles. Interrupt, pause, and resume are not UI polish — they're core to making a voice agent feel responsive rather than robotic.
+
+---
+
 ## 1. Text Description
 
 ### What it does
@@ -120,21 +159,19 @@ Make a short screen recording (30–60 seconds) showing the backend running on G
 2. Show the app loads and is functional (upload a CSV, toggle mic, talk to Gemini)
 3. Point out the URL bar showing `*.run.app` — confirming it's hosted on Cloud Run
 
+### How to host the proof video
+
+Drag & drop the video into the GitHub README web editor — GitHub uploads it to its CDN and inserts a permanent URL. The video is **not committed to the repo**.
+
+1. Record the screen recording (30–60 sec, MP4)
+2. Go to your README on github.com → click the pencil (Edit) icon
+3. Drag the `.mp4` file into the editor — GitHub uploads it and inserts a `https://github.com/user-attachments/...` URL
+4. Commit the README change
+5. Paste that CDN URL into the Devpost "URL to Proof" field
+
 ### How to deploy (if not yet deployed)
 
-See [DEPLOY.md](./DEPLOY.md) for full instructions. Quick version:
-
-```bash
-gcloud run deploy gemini-data-wrangler-live \
-  --project YOUR_PROJECT \
-  --region us-central1 \
-  --source . \
-  --set-env-vars "GOOGLE_API_KEY=your-key" \
-  --allow-unauthenticated \
-  --port 8080 \
-  --session-affinity \
-  --timeout 3600
-```
+See [DEPLOY.md](./DEPLOY.md) for full instructions.
 
 ---
 

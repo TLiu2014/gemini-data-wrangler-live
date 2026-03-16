@@ -77,9 +77,20 @@ https://gemini-data-wrangler-live-xxxxxxxxxx-uc.a.run.app
 
 Open it in your browser — the full app (UI + backend + WebSocket) runs from this single URL.
 
+**Current deployment:** https://gemini-data-wrangler-live-887509405386.us-central1.run.app/
+
+## Automated deploy script
+
+[`deploy.sh`](./deploy.sh) wraps the build, push, and deploy steps into a single command:
+
+```bash
+export GCP_PROJECT="your-project-id"
+./deploy.sh
+```
+
 ## Update
 
-Re-run the build, push, and deploy commands. The new image is rolled out with zero downtime.
+Re-run `./deploy.sh`. The new image is built locally, pushed, and rolled out with zero downtime.
 
 ## Local Docker test (optional)
 

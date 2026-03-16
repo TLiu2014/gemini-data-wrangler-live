@@ -4,6 +4,23 @@ Real-time voice and visual AI agent for collaborative data wrangling. Built for 
 
 Talk to the AI agent via live voice, and watch it manipulate your data pipeline in real time — no text chat box, no typing required.
 
+## Try It
+
+**Live demo:** https://gemini-data-wrangler-live-887509405386.us-central1.run.app/
+
+1. Get a free [Gemini API key](https://aistudio.google.com/apikey)
+2. Open the app and enter your key in the Settings panel (top-right gear icon)
+3. Upload a CSV (or enable sample data in Settings), allow mic access, and start talking
+
+## Deployed on Google Cloud Run
+
+The app is live on Cloud Run at:
+**https://gemini-data-wrangler-live-887509405386.us-central1.run.app/**
+
+https://github.com/user-attachments/assets/REPLACE_WITH_VIDEO_ID
+
+_Screen recording: Cloud Run service dashboard → revision → logs → live app._
+
 ## Features
 
 - **Real-time voice interaction** — Bidirectional audio via Gemini 2.5 Flash Native Audio (Live API). You speak, Gemini speaks back and acts simultaneously.
@@ -36,26 +53,30 @@ Talk to the AI agent via live voice, and watch it manipulate your data pipeline 
 - Node.js >= 20
 - npm >= 10
 - A [Google AI API key](https://aistudio.google.com/apikey)
+- A browser with microphone access (Chrome recommended)
 
-## Setup
+## Local Development
 
 ```bash
 git clone https://github.com/TLiu2014/gemini-data-wrangler-live.git
 cd gemini-data-wrangler-live
 npm install
 cp .env.example .env
-# Edit .env and add your GOOGLE_API_KEY
-```
-
-## Running
-
-```bash
+# Edit .env and set GOOGLE_API_KEY=your-key
 npm start
 ```
 
 Starts both the backend (http://localhost:3001) and frontend (http://localhost:5173) concurrently.
 
 Open http://localhost:5173, upload a CSV, and start talking.
+
+> **API key alternative:** Instead of setting `GOOGLE_API_KEY` in `.env`, you can enter your key directly in the app's Settings panel (top-right gear icon). The key is stored in `sessionStorage` only — never persisted server-side.
+
+> **Mic permission:** The browser will prompt for microphone access on first use. Allow it to enable voice interaction.
+
+## Deployment
+
+See [DEPLOY.md](./DEPLOY.md) for full Google Cloud Run deployment instructions.
 
 ## Project Structure
 
