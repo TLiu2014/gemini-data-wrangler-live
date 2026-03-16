@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import compress from "@fastify/compress";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { registerWebSocketRoutes } from "./ws.js";
@@ -17,6 +18,7 @@ const PORT = Number(process.env.PORT) || 3001;
 async function main() {
   const app = Fastify({ logger: true });
 
+  await app.register(compress, { global: true });
   await app.register(websocket);
   registerWebSocketRoutes(app);
 

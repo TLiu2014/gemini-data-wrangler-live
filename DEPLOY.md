@@ -14,11 +14,18 @@ export GCP_PROJECT="your-project-id"
 
 gcloud config set project $GCP_PROJECT
 
-# Enable required APIs
+# Enable required APIs (no cloudbuild needed for local builds)
 gcloud services enable \
   run.googleapis.com \
-  cloudbuild.googleapis.com \
   artifactregistry.googleapis.com
+
+# Create Artifact Registry repository
+gcloud artifacts repositories create cloud-run-source-deploy \
+  --repository-format=docker \
+  --location=us-central1
+
+# Authenticate Docker to Artifact Registry
+gcloud auth configure-docker us-central1-docker.pkg.dev
 ```
 
 ## API Key Model
@@ -33,12 +40,19 @@ For local development, you can still set `GOOGLE_API_KEY` in your `.env` file as
 # Set your project and preferred region
 export GCP_PROJECT="your-project-id"
 export GCP_REGION="us-central1"
+export IMAGE="us-central1-docker.pkg.dev/$GCP_PROJECT/cloud-run-source-deploy/gemini-data-wrangler-live"
 
-# Build and deploy — no API key env var needed
+# Build image locally (linux/amd64 matches Cloud Run's architecture)
+docker build --platform linux/amd64 -t $IMAGE .
+
+# Push to Artifact Registry
+docker push $IMAGE
+
+# Deploy from image (no Cloud Build used)
 gcloud run deploy gemini-data-wrangler-live \
+  --image $IMAGE \
   --project $GCP_PROJECT \
   --region $GCP_REGION \
-  --source . \
   --allow-unauthenticated \
   --port 8080 \
   --session-affinity \
@@ -48,7 +62,7 @@ gcloud run deploy gemini-data-wrangler-live \
 ```
 
 Key flags:
-- `--source .` — uses Cloud Build to build the Docker image from the Dockerfile
+- `--image` — deploys a pre-built image, skipping Cloud Build entirely
 - `--session-affinity` — keeps WebSocket connections routed to the same instance
 - `--timeout 3600` — allows long-lived WebSocket sessions (up to 1 hour)
 - `--allow-unauthenticated` — makes the app publicly accessible for the demo
@@ -65,7 +79,7 @@ Open it in your browser — the full app (UI + backend + WebSocket) runs from th
 
 ## Update
 
-Re-run the same `gcloud run deploy` command. Cloud Build rebuilds the image and rolls out the new revision with zero downtime.
+Re-run the build, push, and deploy commands. The new image is rolled out with zero downtime.
 
 ## Local Docker test (optional)
 

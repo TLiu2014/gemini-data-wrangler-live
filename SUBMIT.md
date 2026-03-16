@@ -140,6 +140,50 @@ gcloud run deploy gemini-data-wrangler-live \
 
 ## 4. Architecture Diagram
 
+```mermaid
+graph TB
+    subgraph Browser["Browser"]
+        UI["React UI<br/>(React Flow · Recharts · Audio I/O)"]
+        DUCKDB["DuckDB-WASM<br/>(In-browser SQL · No data leaves browser)"]
+        UI <-->|"CSV data / query results"| DUCKDB
+    end
+
+    subgraph CloudRun["Google Cloud Run"]
+        STATIC["Static File Server<br>(/* )"]
+        HEALTH["Health Check<br>(/health)"]
+        WS["WebSocket Handler<br>(/ws)"]
+
+        subgraph Session["GeminiLiveSession (per client)"]
+            CHAT["Chat Session<br/>gemini-2.5-flash-native-audio-preview-12-2025<br/>Persistent · Voice conversation · No tool calls"]
+            EXEC["Execute Session<br/>gemini-2.5-flash-native-audio-preview-09-2025<br/>On-demand · SQL tool calls · Pipeline execution"]
+        end
+
+        WS --> Session
+    end
+
+    subgraph GeminiAPI["Google AI Studio"]
+        GEMINI["Gemini 2.5 Flash Native Audio<br/>Live API (WebSocket)"]
+    end
+
+    Browser <-->|"HTTPS + WSS"| CloudRun
+    CHAT <-->|"Live API WebSocket<br/>Audio · Text · Function calls"| GEMINI
+    EXEC <-->|"Live API WebSocket<br/>Audio · Text · Function calls"| GEMINI
+
+    Browser -.->|"Serves static assets"| STATIC
+```
+
+### Flow
+
+1. **User uploads CSV** → parsed by DuckDB-WASM in the browser; schema sent to server via WebSocket
+2. **User speaks** → PCM audio streamed to server → forwarded to Gemini Live API
+3. **Gemini responds** → audio streamed back → played in browser; tool calls intercepted by server
+4. **Tool call (executeDataTransform)** → server sends SQL to browser → DuckDB-WASM executes → result returned to server → forwarded to Gemini as tool result
+5. **Execute Canvas** → full pipeline graph sent to execute session (09-2025) → Gemini fills incomplete stages, narrates results, stays live for follow-up voice
+
+---
+
+### ASCII fallback
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Google Cloud Run                         │

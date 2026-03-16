@@ -113,7 +113,7 @@ export default function App() {
   const [dataLayout, setDataLayout] = useState<"top-bottom" | "left-right">(
     () =>
       (localStorage.getItem("flow_data_layout") as "top-bottom" | "left-right" | null)
-      ?? "top-bottom",
+      ?? "left-right",
   );
 
   // API key

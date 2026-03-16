@@ -10,7 +10,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY server/package.json server/
 COPY ui/package.json ui/
 
-RUN npm ci
+RUN rm package-lock.json && npm install
 
 # Copy source code
 COPY server/ server/
@@ -24,11 +24,11 @@ FROM node:22-slim
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY server/package.json server/
 
 # Install production deps only
-RUN npm ci -w server --omit=dev
+RUN npm install -w server --omit=dev
 
 # Copy built artifacts
 COPY --from=build /app/server/dist server/dist
